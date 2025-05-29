@@ -8,9 +8,16 @@ dev-debug.log
 
 # Dependency directories
 node_modules/
+backend/venv/
+backend/.pytest_cache/
 
 # Environment variables
 .env
+backend/.env.example
+
+# Database files
+*.db
+*.db.backup
 
 # Editor directories and files
 .idea
@@ -26,4 +33,17 @@ node_modules/
 
 # Task files
 tasks.json
-tasks/ 
+tasks/
+
+# Test files and debug scripts
+test_*.py
+debug_*.py
+**/tests/
+
+# Build outputs
+frontend/dist/
+frontend/node_modules/
+
+# Temporary files
+*.tmp
+~$* 
