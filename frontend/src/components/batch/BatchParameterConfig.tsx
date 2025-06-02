@@ -546,9 +546,9 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
           </div>
         </div>
         
-        {/* RISK ADJUSTMENT FACTOR (RAF) SECTION */}
+        {/* REVENUE ADJUSTMENT FACTOR (RAF) SECTION */}
         <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
-          <h3 className="text-lg font-semibold mb-3 text-blue-700">Risk Adjustment Factor (RAF)</h3>
+          <h3 className="text-lg font-semibold mb-3 text-blue-700">Revenue Adjustment Factor (RAF)</h3>
           
           <div className="flex items-center mb-4 bg-green-50 p-3 rounded-md border border-green-100">
             <div className="mr-2 text-green-500">
@@ -557,7 +557,7 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
               </svg>
             </div>
             <p className="text-sm text-green-800 font-medium">
-              RAF is used to adjust bonuses based on risk-taking behavior. A value of 1.0 means no adjustment, values below 1.0 reduce bonuses, and values above 1.0 increase bonuses.
+              RAF is used to adjust bonuses based on revenue performance. A value of 1.0 means no adjustment, values below 1.0 reduce bonuses, and values above 1.0 increase bonuses.
             </p>
           </div>
           
