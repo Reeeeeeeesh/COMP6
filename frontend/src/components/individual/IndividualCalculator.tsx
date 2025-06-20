@@ -433,7 +433,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                 step="0.01"
                 value={((parameters.targetBonusPct || 0.15) * 100).toFixed(0)}
                 onChange={(e) => handleParameterChange('targetBonusPct', Number(e.target.value) / 100)}
-                className="w-20 p-2 border rounded text-right"
+                className="w-20 p-2 border rounded text-right text-gray-800"
               />
               <span className="ml-2 text-sm font-medium">%</span>
             </div>
@@ -465,7 +465,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                     step="1"
                     value={((parameters.investmentWeight || 0.6) * 100).toFixed(0)}
                     onChange={(e) => handleParameterChange('investmentWeight', Number(e.target.value) / 100)}
-                    className="w-20 p-2 border rounded text-right"
+                    className="w-20 p-2 border rounded text-right text-gray-800"
                   />
                   <span className="ml-2 text-sm font-medium">%</span>
                 </div>
@@ -491,7 +491,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                     step="1"
                     value={((parameters.qualitativeWeight || 0.4) * 100).toFixed(0)}
                     onChange={(e) => handleParameterChange('qualitativeWeight', Number(e.target.value) / 100)}
-                    className="w-20 p-2 border rounded text-right"
+                    className="w-20 p-2 border rounded text-right text-gray-800"
                   />
                   <span className="ml-2 text-sm font-medium">%</span>
                 </div>
@@ -524,7 +524,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                     step="0.1"
                     value={(parameters.investmentScoreMultiplier || 1.0).toFixed(1)}
                     onChange={(e) => handleParameterChange('investmentScoreMultiplier', Number(e.target.value))}
-                    className="w-20 p-2 border rounded text-right"
+                    className="w-20 p-2 border rounded text-right text-gray-800"
                   />
                   <span className="ml-2 text-sm font-medium">×</span>
                 </div>
@@ -549,7 +549,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                     step="0.1"
                     value={(parameters.qualScoreMultiplier || 1.0).toFixed(1)}
                     onChange={(e) => handleParameterChange('qualScoreMultiplier', Number(e.target.value))}
-                    className="w-20 p-2 border rounded text-right"
+                    className="w-20 p-2 border rounded text-right text-gray-800"
                   />
                   <span className="ml-2 text-sm font-medium">×</span>
                 </div>
@@ -597,7 +597,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                   step="0.1"
                   value={(parameters.raf || 1.0).toFixed(1)}
                   onChange={(e) => handleParameterChange('raf', Number(e.target.value))}
-                  className="w-20 p-2 border rounded text-right"
+                  className="w-20 p-2 border rounded text-right text-gray-800"
                   disabled={parameters.useDirectRaf && !!employeeData.employee_data?.additional_data?.raf}
                 />
                 <span className="ml-2 text-sm font-medium">×</span>
@@ -630,7 +630,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                     step="0.1"
                     value={((parameters.mrtCapPct || 2.0) * 100).toFixed(0)}
                     onChange={(e) => handleParameterChange('mrtCapPct', Number(e.target.value) / 100)}
-                    className="w-20 p-2 border rounded text-right"
+                    className="w-20 p-2 border rounded text-right text-gray-800"
                   />
                   <span className="ml-2 text-sm font-medium">%</span>
                 </div>
@@ -655,7 +655,7 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                     step="0.5"
                     value={(parameters.baseSalaryCapMultiplier || 3.0).toFixed(1)}
                     onChange={(e) => handleParameterChange('baseSalaryCapMultiplier', Number(e.target.value))}
-                    className="w-20 p-2 border rounded text-right"
+                    className="w-20 p-2 border rounded text-right text-gray-800"
                   />
                   <span className="ml-2 text-sm font-medium">×</span>
                 </div>

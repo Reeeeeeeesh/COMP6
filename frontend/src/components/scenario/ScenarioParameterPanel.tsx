@@ -184,7 +184,7 @@ export const ScenarioParameterPanel: React.FC<ScenarioParameterPanelProps> = ({
   // Helper function to get input class with error styling
   const getInputClassName = (fieldName: string, baseClass: string = "") => {
     const hasError = errors[fieldName];
-    const errorClass = hasError ? "border-red-300 bg-red-50" : "border-gray-300";
+    const errorClass = hasError ? "border-red-300 bg-red-50 text-red-600" : "border-gray-300 text-gray-800";
     return `${baseClass} ${errorClass}`.trim();
   };
 

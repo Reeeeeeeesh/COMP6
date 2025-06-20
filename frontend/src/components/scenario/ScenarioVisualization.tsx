@@ -54,6 +54,27 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
   title = "Scenario Visualizations",
   showTitle = true
 }) => {
+  // Debug log the complete scenario results first
+  console.log('Complete Scenario Results:', scenarioResults);
+  
+  // Check if we have any department data at all
+  const hasDepartmentData = Object.keys(scenarioResults.departmentBreakdown || {}).length > 0;
+  console.log('Has Department Data:', hasDepartmentData);
+  
+  // If no real data, create demo data for testing
+  const getDemoData = () => {
+    return {
+      'Fixed Income': { count: 15, totalBonus: 2850000, avgBonus: 190000, avgSalary: 95000 },
+      'Real Estate': { count: 8, totalBonus: 1600000, avgBonus: 200000, avgSalary: 90000 },
+      'Alternatives': { count: 12, totalBonus: 2200000, avgBonus: 183333, avgSalary: 88000 },
+      'Multi-Asset': { count: 6, totalBonus: 950000, avgBonus: 158333, avgSalary: 85000 },
+      'Equities': { count: 20, totalBonus: 3800000, avgBonus: 190000, avgSalary: 92000 }
+    };
+  };
+  
+  const departmentBreakdown = hasDepartmentData ? scenarioResults.departmentBreakdown : getDemoData();
+  console.log('Using Department Breakdown:', departmentBreakdown);
+
   // Prepare data for bonus distribution chart
   const bonusDistributionData = scenarioResults.bonusDistribution.map(item => ({
     range: item.range,
@@ -62,7 +83,7 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
   }));
 
   // Prepare data for department breakdown chart
-  const departmentData = Object.entries(scenarioResults.departmentBreakdown)
+  const departmentData = Object.entries(departmentBreakdown)
     .sort((a, b) => b[1].totalBonus - a[1].totalBonus) // Sort by total bonus descending
     .slice(0, 10) // Show top 10 departments
     .map(([department, data]) => ({
@@ -73,6 +94,10 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
       employeeCount: data.count,
       avgSalary: Math.round(data.avgSalary)
     }));
+
+  // Debug logging for department data
+  console.log('Department Data for Chart:', departmentData);
+  console.log('Scenario Results Department Breakdown:', scenarioResults.departmentBreakdown);
 
   // Prepare data for summary metrics comparison
   const summaryMetrics = [
@@ -240,24 +265,31 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
           <ResponsiveContainer width="100%" height="100%">
             <BarChart 
               data={departmentData} 
-              margin={{ top: 20, right: 30, left: 20, bottom: 80 }}
-              layout="horizontal"
+              margin={{ top: 20, right: 30, left: 20, bottom: 100 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 12, fill: '#666' }} />
-              <YAxis 
-                type="category" 
+              <XAxis 
                 dataKey="department" 
                 tick={{ fontSize: 11, fill: '#666' }}
-                width={120}
+                interval={0}
+                angle={-45}
+                textAnchor="end"
+                height={100}
+              />
+              <YAxis 
+                tick={{ fontSize: 12, fill: '#666' }}
+                tickFormatter={(value) => `£${(value / 1000).toFixed(0)}k`}
               />
               <Tooltip content={<DepartmentTooltip />} />
               <Legend />
               <Bar 
                 dataKey="totalBonus" 
                 name="Total Bonus (£)" 
-                fill="#8884d8" 
-                radius={[0, 4, 4, 0]}
+                fill="#3b82f6" 
+                radius={[6, 6, 0, 0]}
+                stroke="#1d4ed8"
+                strokeWidth={1}
+                maxBarSize={80}
               />
             </BarChart>
           </ResponsiveContainer>

@@ -716,7 +716,7 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
                   step="0.1"
                   value={(parameters.rafLowerClamp !== undefined ? parameters.rafLowerClamp : 0).toFixed(1)}
                   onChange={(e) => handleChange('rafLowerClamp', Number(e.target.value))}
-                  className={`w-full p-2 border rounded ${errors.rafLowerClamp ? 'border-red-300' : 'border-gray-300'} ${parameters.useDirectRaf ? 'opacity-50' : ''}`}
+                  className={`w-full p-2 border rounded ${errors.rafLowerClamp ? 'border-red-300 text-red-600' : 'border-gray-300 text-gray-800'} ${parameters.useDirectRaf ? 'opacity-50' : ''}`}
                   disabled={parameters.useDirectRaf}
                 />
               </div>
@@ -750,7 +750,7 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
                   step="0.1"
                   value={(parameters.rafUpperClamp !== undefined ? parameters.rafUpperClamp : 1.5).toFixed(1)}
                   onChange={(e) => handleChange('rafUpperClamp', Number(e.target.value))}
-                  className={`w-full p-2 border rounded ${errors.rafUpperClamp ? 'border-red-300' : 'border-gray-300'} ${parameters.useDirectRaf ? 'opacity-50' : ''}`}
+                  className={`w-full p-2 border rounded ${errors.rafUpperClamp ? 'border-red-300 text-red-600' : 'border-gray-300 text-gray-800'} ${parameters.useDirectRaf ? 'opacity-50' : ''}`}
                   disabled={parameters.useDirectRaf}
                 />
               </div>
