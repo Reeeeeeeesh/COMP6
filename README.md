@@ -8,7 +8,6 @@ A comprehensive web application for calculating employee bonuses with batch proc
 ├── frontend/          # React + TypeScript frontend
 ├── backend/           # FastAPI Python backend
 ├── shared/            # Shared types and utilities
-├── tasks/             # TaskMaster AI task management
 └── scripts/           # Development and deployment scripts
 ```
 
@@ -28,6 +27,7 @@ A comprehensive web application for calculating employee bonuses with batch proc
 - React Query for data fetching
 - React Hook Form for form handling
 - Recharts for data visualization
+- Vitest for testing
 
 ### Backend
 - FastAPI with Python 3.11
@@ -41,6 +41,12 @@ A comprehensive web application for calculating employee bonuses with batch proc
 - Node.js 18+ and npm
 - Python 3.11+
 - PostgreSQL (optional, SQLite used by default)
+
+### Environment Setup
+1. Copy `env.example` to `.env` and configure your environment variables:
+   ```bash
+   cp env.example .env
+   ```
 
 ### Frontend Setup
 ```bash
@@ -62,14 +68,46 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### Database Setup
+```bash
+# From the backend directory
+python fix_database.py      # Fix any database issues
+python update_schema.py     # Update database schema if needed
+```
+
 ## Development
 
-This project uses TaskMaster AI for task management. Use the following commands:
+### Testing
+```bash
+# Frontend tests
+cd frontend
+npm test
 
-- `task-master list` - View all tasks
-- `task-master next` - Find the next task to work on
-- `task-master expand --id=<id>` - Break down complex tasks
-- `task-master set-status --id=<id> --status=done` - Mark tasks as complete
+# Backend tests
+cd backend
+pytest
+```
+
+### Available Scripts
+
+#### Frontend
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run test` - Run tests
+- `npm run lint` - Lint code
+
+#### Backend
+- `uvicorn app.main:app --reload` - Start development server
+- `python fix_database.py` - Fix database issues
+- `python update_schema.py` - Update database schema
+
+## Project Status
+
+This project is actively under development with a focus on:
+- Robust batch processing capabilities
+- Real-time calculation engine
+- Advanced scenario modeling
+- Comprehensive data visualization
 
 ## License
 
