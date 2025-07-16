@@ -11,6 +11,12 @@ node_modules/
 backend/venv/
 backend/.pytest_cache/
 
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
 # Environment variables
 .env
 backend/.env.example
@@ -22,6 +28,7 @@ backend/.env.example
 # Editor directories and files
 .idea
 .vscode
+.cursor/
 *.suo
 *.ntvs*
 *.njsproj
