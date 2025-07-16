@@ -11,7 +11,7 @@ from .models import Session as SessionModel
 from .schemas import ApiResponse, SessionResponse
 from .services.session_service import SessionService
 from .services.data_retention_service import DataRetentionService
-from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios
+from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios, dashboard
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -109,6 +109,9 @@ app.include_router(batch_calculations.router, prefix="/api/v1")  # Alternative p
 
 # Include scenarios router
 app.include_router(scenarios.router)  # Router already has prefix='/api/v1/scenarios'
+
+# Include dashboard router
+app.include_router(dashboard.router)  # Router already has prefix='/api/v1/dashboard'
 
 @app.get("/")
 async def root():

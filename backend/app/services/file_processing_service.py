@@ -408,15 +408,42 @@ class FileProcessingService:
         
         employee_data['additional_data'] = additional_data if additional_data else None
         
-        # Basic validation
-        validation_errors = []
-        if not employee_data['employee_id']:
-            validation_errors.append("Missing employee_id")
-        if not employee_data['salary'] or employee_data['salary'] <= 0:
-            validation_errors.append("Invalid or missing salary")
+        # Enhanced validation using validation_utils
+        from ..validation_utils import validate_employee_data
         
-        employee_data['is_valid'] = len(validation_errors) == 0
-        employee_data['validation_errors'] = validation_errors if validation_errors else None
+        # Prepare data for validation
+        validation_data = {
+            'base_salary': employee_data['salary'],
+            'employee_id': employee_data['employee_id']
+        }
+        
+        # Add additional data for validation if present
+        if additional_data:
+            for key, value in additional_data.items():
+                try:
+                    # Try to convert numeric values
+                    if key in ['target_bonus_pct', 'investment_weight', 'qualitative_weight', 
+                              'investment_score_multiplier', 'qual_score_multiplier', 'raf', 'mrt_cap_pct']:
+                        validation_data[key] = float(value) if value else None
+                    elif key == 'is_mrt':
+                        validation_data[key] = value.lower() in ['true', '1', 'yes', 'y'] if value else False
+                    else:
+                        validation_data[key] = value
+                except (ValueError, AttributeError):
+                    validation_data[key] = value
+        
+        # Perform comprehensive validation
+        validation_result = validate_employee_data(
+            validation_data, 
+            row_number=row_number, 
+            employee_id=employee_data['employee_id']
+        )
+        
+        # Combine errors and warnings
+        all_messages = validation_result.errors + validation_result.warnings
+        
+        employee_data['is_valid'] = validation_result.is_valid
+        employee_data['validation_errors'] = all_messages if all_messages else None
         
         # Create database record
         employee = EmployeeData(**employee_data)

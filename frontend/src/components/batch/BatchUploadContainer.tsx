@@ -9,6 +9,8 @@ import { Button, CircularProgress, Box, Typography, LinearProgress } from '@mui/
 import { CalculateOutlined } from '@mui/icons-material';
 import { API_BASE_URL } from '../../config';
 import { NavigationHeader } from '../common/NavigationHeader';
+import { ErrorDisplay } from '../common/ErrorDisplay';
+import { parseApiError, ErrorItem } from '../../utils/errorHandling';
 
 export interface BatchUpload {
   id: string;
@@ -58,14 +60,14 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   const [uploadData, setUploadData] = useState<UploadData | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<ErrorItem[]>([]);
   const [parameters, setParameters] = useState<BatchParameters | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [calculationProgress, setCalculationProgress] = useState<number>(0);
 
   const handleFileSelect = useCallback(async (file: File) => {
     console.log('Starting file upload process with file:', file.name, 'size:', file.size);
-    setError(null);
+    setErrors([]);
     setIsUploading(true);
     setCurrentStep('processing');
     setUploadProgress(0);
@@ -152,11 +154,11 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
 
     } catch (err) {
       console.error('Error in file upload process:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Upload failed';
-      console.error('Setting error message:', errorMessage);
-      setError(errorMessage);
+      const parsed = parseApiError(err);
+      console.error('Setting error messages:', parsed.errors);
+      setErrors(parsed.errors);
       setCurrentStep('upload');
-      onError?.(errorMessage);
+      onError?.(parsed.summary);
     } finally {
       console.log('Upload process completed (success or failure)');
       setIsUploading(false);
@@ -168,13 +170,9 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
     setUploadData(null);
     setUploadProgress(0);
     setIsUploading(false);
-    setError(null);
+    setErrors([]);
   }, []);
 
-  const handleRetry = useCallback(() => {
-    setError(null);
-    setCurrentStep('upload');
-  }, []);
 
   const handleParametersUpdate = useCallback((newParameters: BatchParameters) => {
     setParameters(newParameters);
@@ -183,7 +181,11 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   const handleStartCalculation = useCallback(async () => {
     console.log('Starting calculation with:', { uploadData, parameters });
     if (!uploadData || !parameters) {
-      setError('Missing upload data or parameters');
+      setErrors([{
+        message: 'Missing upload data or parameters',
+        severity: 'error',
+        suggestions: ['Please complete the file upload and parameter configuration first']
+      }]);
       return;
     }
 
@@ -191,7 +193,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       setIsCalculating(true);
       setCurrentStep('calculating');
       setCalculationProgress(0);
-      setError(null);
+      setErrors([]);
 
       // Simulate calculation progress
       const progressInterval = setInterval(() => {
@@ -296,7 +298,15 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                   pollErrorCount++;
                   if (pollErrorCount > 5) {
                     clearInterval(pollInterval);
-                    setError('Failed to retrieve calculation results. Please try again.');
+                    setErrors([{
+                      message: 'Failed to retrieve calculation results after multiple attempts',
+                      severity: 'error',
+                      suggestions: [
+                        'Check your internet connection',
+                        'Try refreshing the page',
+                        'Contact support if the problem persists'
+                      ]
+                    }]);
                     setCurrentStep('parameters');
                   }
                 }
@@ -308,14 +318,29 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
               clearInterval(pollInterval);
               // Only show error if we're still in progress
               if (currentStep === 'calculating') {
-                setError('Calculation timed out. Please check the results page manually.');
+                setErrors([{
+                  message: 'Calculation timed out after 2 minutes',
+                  severity: 'warning',
+                  suggestions: [
+                    'Check the results page manually - calculation may still be in progress',
+                    'Try with a smaller batch size',
+                    'Contact support for large datasets'
+                  ]
+                }]);
                 setCurrentStep('parameters');
               }
             }, 120000); // 2 minutes
           } else {
             // Unknown status or no useful information in the response
             console.warn('No result ID found in response. Available properties:', Object.keys(result.data));
-            setError('Unable to determine calculation status. Please try again.');
+            setErrors([{
+              message: 'Unable to determine calculation status',
+              severity: 'error',
+              suggestions: [
+                'Please try starting the calculation again',
+                'Verify your data and parameters are correct'
+              ]
+            }]);
             setCurrentStep('parameters');
           }
         }
@@ -328,11 +353,10 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       }
     } catch (err) {
       console.error('Error in calculation process:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Calculation failed';
-      console.error('Setting error message:', errorMessage);
-      setError(errorMessage);
+      const parsed = parseApiError(err);
+      console.error('Setting error messages:', parsed.errors);
+      setErrors(parsed.errors);
       setCurrentStep('parameters');
-      // No need to clear progressInterval as it's not defined
       setCalculationProgress(0);
     } finally {
       console.log('Calculation process completed (success or failure)');
@@ -379,18 +403,33 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
         </div>
       </div>
 
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex justify-between items-center">
-          <div>
-            <span className="font-bold">Error</span>
-            <p>{error}</p>
-          </div>
-          <div>
-            <button 
-              onClick={handleRetry}
-              className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+      {/* Error Display */}
+      {errors.length > 0 && (
+        <div className="mb-6">
+          <ErrorDisplay 
+            errors={errors} 
+            title="Issues Found"
+            collapsible={true}
+            showContext={true}
+          />
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => setErrors([])}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
             >
               Try Again
+            </button>
+            <button
+              onClick={() => {
+                setErrors([]);
+                setCurrentStep('upload');
+                setUploadData(null);
+                setUploadProgress(0);
+                setIsUploading(false);
+              }}
+              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+            >
+              Start Over
             </button>
           </div>
         </div>

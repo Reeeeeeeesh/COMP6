@@ -6,6 +6,8 @@ import SimpleBatchResults from './components/batch/SimpleBatchResults'; // Rever
 import { CalculatorContainer } from './components/individual/CalculatorContainer';
 import { ScenarioPlayground } from './components/scenario/ScenarioPlayground';
 import UserGuide from './components/UserGuide';
+import { Dashboard } from './components/dashboard/Dashboard';
+import { PageTransition } from './components/common/PageTransition';
 import { API_BASE_URL } from './config'; // Import API_BASE_URL for consistent API calls
 
 function App() {
@@ -72,80 +74,97 @@ function App() {
     );
   }
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        <h1 className="text-4xl font-bold text-center text-gray-900 mb-8">
-          Bonus Calculator
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="container mx-auto px-6 py-12">
+        <h1 className="text-5xl font-bold text-center text-gray-900 mb-12 tracking-tight">
+          <span className="gradient-text">Bonus Calculator</span>
         </h1>
 
         <Router>
           <Routes key={isLoading ? 'loading-routes' : 'loaded-routes'}>
             <Route path="/" element={
-              <div className="max-w-4xl mx-auto">
-                <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-                  <h2 className="text-2xl font-semibold text-gray-800 mb-4">
-                    Welcome to the Bonus Calculator
-                  </h2>
-                  <p className="text-gray-600 mb-6">
-                    A comprehensive tool for calculating employee bonuses with batch processing,
-                    real-time calculations, and scenario modeling.
-                  </p>
+              <PageTransition>
+                <div className="max-w-4xl mx-auto">
+                  <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-8 mb-8">
+                    <h2 className="text-3xl font-bold text-gray-900 mb-6">
+                      Welcome to the Bonus Calculator
+                    </h2>
+                    <p className="text-lg text-gray-600 mb-8 leading-relaxed">
+                      A comprehensive tool for calculating employee bonuses with batch processing,
+                      real-time calculations, and scenario modeling.
+                    </p>
                   
                   {/* User Guide Button - Prominent placement */}
-                  <div className="mb-8 text-center">
+                  <div className="mb-10 text-center">
                     <Link to="/user-guide">
-                      <button className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg text-lg shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105">
+                      <button className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-bold py-4 px-10 rounded-xl text-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 hover:-translate-y-1">
                         📖 Complete User Guide
                       </button>
                     </Link>
-                    <p className="text-sm text-gray-500 mt-2">
+                    <p className="text-sm text-gray-500 mt-3">
                       New to the system? Start here for comprehensive instructions
                     </p>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                    <div className="group border border-gray-200 rounded-xl p-6 hover:shadow-xl hover:border-indigo-200 transition-all duration-300 transform hover:-translate-y-2">
+                      <h3 className="text-xl font-bold text-gray-900 mb-3">
+                        Dashboard
+                      </h3>
+                      <p className="text-gray-600 mb-6 leading-relaxed">
+                        View analytics, charts, and insights from your bonus calculations.
+                      </p>
+                      <Link to="/dashboard">
+                        <button
+                          className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-300 transform group-hover:scale-105"
+                        >
+                          View Dashboard
+                        </button>
+                      </Link>
+                    </div>
+                    
+                    <div className="group border border-gray-200 rounded-xl p-6 hover:shadow-xl hover:border-blue-200 transition-all duration-300 transform hover:-translate-y-2">
+                      <h3 className="text-xl font-bold text-gray-900 mb-3">
                         Batch Processing
                       </h3>
-                      <p className="text-gray-600 mb-4">
+                      <p className="text-gray-600 mb-6 leading-relaxed">
                         Upload CSV files to calculate bonuses for multiple employees at once.
                       </p>
                       <Link to="/batch">
                         <button
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors"
+                          className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-300 transform group-hover:scale-105"
                         >
                           Start Batch Upload
                         </button>
                       </Link>
                     </div>
                     
-                    <div className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    <div className="group border border-gray-200 rounded-xl p-6 hover:shadow-xl hover:border-green-200 transition-all duration-300 transform hover:-translate-y-2">
+                      <h3 className="text-xl font-bold text-gray-900 mb-3">
                         Individual Calculator
                       </h3>
-                      <p className="text-gray-600 mb-4">
+                      <p className="text-gray-600 mb-6 leading-relaxed">
                         Calculate bonuses for individual employees with real-time results.
                       </p>
                       <Link to="/calculator">
                         <button
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors"
+                          className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-300 transform group-hover:scale-105"
                         >
                           Open Calculator
                         </button>
                       </Link>
                     </div>
 
-                    <div className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    <div className="group border border-gray-200 rounded-xl p-6 hover:shadow-xl hover:border-purple-200 transition-all duration-300 transform hover:-translate-y-2">
+                      <h3 className="text-xl font-bold text-gray-900 mb-3">
                         Scenario Playground
                       </h3>
-                      <p className="text-gray-600 mb-4">
+                      <p className="text-gray-600 mb-6 leading-relaxed">
                         Create "what-if" scenarios from existing batch data with real-time parameter adjustments.
                       </p>
                       <Link to="/scenarios">
                         <button
-                          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md transition-colors"
+                          className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-300 transform group-hover:scale-105"
                         >
                           Create Scenario
                         </button>
@@ -154,25 +173,27 @@ function App() {
                   </div>
                 </div>
                 
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                  <h3 className="text-lg font-medium text-blue-900 mb-2">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-blue-900 mb-3">
                     Session Information
                   </h3>
                   <p className="text-blue-700 text-sm">
-                    Session ID: <code className="bg-blue-100 px-2 py-1 rounded text-xs">{sessionId}</code>
+                    Session ID: <code className="bg-blue-100 px-3 py-1 rounded-md text-xs font-mono">{sessionId}</code>
                   </p>
-                  <p className="text-blue-600 text-sm mt-1">
+                  <p className="text-blue-600 text-sm mt-2">
                     Your session will automatically expire after 24 hours of inactivity.
                   </p>
                 </div>
-              </div>
+                </div>
+              </PageTransition>
             } />
-            <Route path="/batch" element={<BatchUploadContainer sessionId={sessionId} onUploadComplete={handleUploadComplete} onError={handleUploadError} />} />
-            <Route path="/batch/:uploadId/results/:resultId" element={<SimpleBatchResults />} />
-            <Route path="/calculator" element={<div className="max-w-4xl mx-auto"><p className="text-center p-8 text-gray-500">Please select an employee from batch results to use the calculator.</p></div>} />
-            <Route path="/calculator/:resultId" element={<CalculatorContainer />} />
-            <Route path="/scenarios" element={<ScenarioPlayground sessionId={sessionId} onError={handleUploadError} />} />
-            <Route path="/user-guide" element={<UserGuide />} />
+            <Route path="/dashboard" element={<PageTransition><Dashboard sessionId={sessionId} /></PageTransition>} />
+            <Route path="/batch" element={<PageTransition><BatchUploadContainer sessionId={sessionId} onUploadComplete={handleUploadComplete} onError={handleUploadError} /></PageTransition>} />
+            <Route path="/batch/:uploadId/results/:resultId" element={<PageTransition><SimpleBatchResults /></PageTransition>} />
+            <Route path="/calculator" element={<PageTransition><div className="max-w-4xl mx-auto"><p className="text-center p-8 text-gray-500">Please select an employee from batch results to use the calculator.</p></div></PageTransition>} />
+            <Route path="/calculator/:resultId" element={<PageTransition><CalculatorContainer /></PageTransition>} />
+            <Route path="/scenarios" element={<PageTransition><ScenarioPlayground sessionId={sessionId} onError={handleUploadError} /></PageTransition>} />
+            <Route path="/user-guide" element={<PageTransition><UserGuide /></PageTransition>} />
           </Routes>
         </Router>
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useRef } from 'react';
+import { Alert, Snackbar } from '@mui/material';
 import { API_BASE_URL } from '../../config';
 
 interface FileUploadProps {
@@ -14,7 +15,19 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [showError, setShowError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const showErrorMessage = (message: string) => {
+    setErrorMessage(message);
+    setShowError(true);
+  };
+
+  const hideErrorMessage = () => {
+    setShowError(false);
+    setErrorMessage('');
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -35,11 +48,20 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     if (disabled) return;
 
     const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      const file = files[0];
-      if (validateFile(file)) {
-        setSelectedFile(file);
-      }
+    if (files.length === 0) {
+      showErrorMessage('No files detected. Please try selecting a file instead.');
+      return;
+    }
+    
+    if (files.length > 1) {
+      showErrorMessage('Multiple files detected. Please select only one CSV file.');
+      return;
+    }
+    
+    const file = files[0];
+    if (validateFile(file)) {
+      setSelectedFile(file);
+      hideErrorMessage(); // Clear any previous errors
     }
   }, [disabled]);
 
@@ -49,6 +71,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       const file = files[0];
       if (validateFile(file)) {
         setSelectedFile(file);
+        hideErrorMessage(); // Clear any previous errors
       }
     }
   }, []);
@@ -61,13 +84,29 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                        validExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
     
     if (!isValidType) {
-      alert('Please select a CSV file (.csv or .txt)');
+      const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'unknown';
+      showErrorMessage(
+        `Invalid file format '${fileExtension}'. Please select a CSV file (.csv or .txt). ` +
+        `Your file: '${file.name}' - Try exporting your data as CSV from Excel or Google Sheets.`
+      );
       return false;
     }
 
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
-      alert('File size must be less than 10MB');
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      showErrorMessage(
+        `File size too large: ${fileSizeMB}MB. Maximum allowed: 10MB. ` +
+        `Try reducing the number of rows or removing unnecessary columns.`
+      );
+      return false;
+    }
+
+    // Check for empty file
+    if (file.size === 0) {
+      showErrorMessage(
+        `File '${file.name}' is empty. Please select a file with data.`
+      );
       return false;
     }
 
@@ -112,7 +151,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       document.body.removeChild(a);
     } catch (error) {
       console.error('Error downloading template:', error);
-      alert('Failed to download template. Please try again.');
+      showErrorMessage(
+        'Failed to download template. Please check your internet connection and try again. ' +
+        'If the problem persists, you can create a CSV file manually with the required columns.'
+      );
     }
   }, []);
 
@@ -268,6 +310,22 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           <li>• First row should contain column headers</li>
         </ul>
       </div>
+      
+      {/* Error Message Snackbar */}
+      <Snackbar 
+        open={showError} 
+        autoHideDuration={6000} 
+        onClose={hideErrorMessage}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={hideErrorMessage} 
+          severity="error" 
+          sx={{ width: '100%', maxWidth: '600px' }}
+        >
+          {errorMessage}
+        </Alert>
+      </Snackbar>
     </div>
   );
 };

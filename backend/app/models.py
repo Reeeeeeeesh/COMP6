@@ -106,10 +106,13 @@ class BatchCalculationResult(Base):
     total_employees = Column(Integer, nullable=False)
     total_base_salary = Column(Float, nullable=False)
     total_bonus_amount = Column(Float, nullable=False)
+    total_bonus_pool = Column(Float, nullable=False)
+    average_bonus = Column(Float)
     average_bonus_percentage = Column(Float)
     
     # Metadata
     calculated_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=func.now())
     calculation_parameters = Column(JSON)
     
     # Relationships

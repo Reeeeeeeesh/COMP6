@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Upload, Calculator, PlayCircle, BarChart3, Settings, Users, FileText, Lightbulb, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Upload, Calculator, PlayCircle, BarChart3, FileText, Lightbulb, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const UserGuide: React.FC = () => {
