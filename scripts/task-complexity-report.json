@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "generatedAt": "2025-05-23T16:11:06.954Z",
+    "tasksAnalyzed": 11,
+    "thresholdScore": 5,
+    "projectName": "Taskmaster",
+    "usedResearch": false
+  },
+  "complexityAnalysis": [
+    {
+      "taskId": 5,
+      "taskTitle": "Implement Batch Processing Module - Column Mapping and Template Management",
+      "complexityScore": 7,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Break down the Column Mapping and Template Management implementation into subtasks covering: 1) Frontend column mapping interface, 2) Template management UI components, 3) Backend API endpoints for column mapping, 4) Backend API endpoints for template management, and 5) Auto-mapping algorithm implementation. For each subtask, include specific acceptance criteria and technical considerations.",
+      "reasoning": "This task involves both frontend and backend components with complex interactions. The column mapping requires a sophisticated UI for matching source columns to target fields, auto-mapping algorithms, and template storage. The task includes multiple API endpoints and stateful UI components, making it moderately complex. The provided code examples show significant complexity in the UI components."
+    },
+    {
+      "taskId": 6,
+      "taskTitle": "Implement Batch Processing Module - Global Parameter Configuration",
+      "complexityScore": 6,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Divide the Global Parameter Configuration implementation into subtasks covering: 1) Parameter configuration UI components with validation, 2) Parameter storage in batch records, 3) Parameter preset functionality, and 4) Integration with the calculation engine. For each subtask, specify the technical requirements, validation rules, and integration points with other modules.",
+      "reasoning": "This task focuses on creating a parameter configuration interface with validation logic and integration with the calculation engine. While less complex than the column mapping task, it still requires careful implementation of validation rules (e.g., weights must sum to 100%) and integration with the batch processing workflow. The UI components need to handle interdependent values and provide immediate feedback."
+    },
+    {
+      "taskId": 7,
+      "taskTitle": "Implement Batch Processing Module - Calculation and Results Display",
+      "complexityScore": 8,
+      "recommendedSubtasks": 6,
+      "expansionPrompt": "Break down the Batch Calculation and Results Display implementation into subtasks covering: 1) Batch calculation service implementation, 2) Results table UI with sorting and filtering, 3) Summary statistics components, 4) Progress tracking for large batches, 5) Export functionality, and 6) Backend API endpoints. For each subtask, include performance considerations, error handling strategies, and integration requirements.",
+      "reasoning": "This is a high-complexity task that involves implementing the core calculation engine for processing potentially large batches of employee data. It requires efficient data processing, progress tracking, and comprehensive UI for displaying and interacting with results. The calculation logic must handle various parameters and edge cases while maintaining performance. The export functionality and filtering/sorting features add additional complexity."
+    },
+    {
+      "taskId": 8,
+      "taskTitle": "Implement Individual Compensation Calculator - Data Loading from Batch",
+      "complexityScore": 5,
+      "recommendedSubtasks": 3,
+      "expansionPrompt": "Divide the Individual Calculator Data Loading implementation into subtasks covering: 1) Employee selection interface from batch results, 2) State management for individual calculator data, and 3) Navigation and data transfer between batch results and individual calculator. For each subtask, detail the user experience flow, state management approach, and integration with the batch processing module.",
+      "reasoning": "This task focuses on the transition from batch processing to individual calculation. It's moderately complex, requiring effective state management and data transfer between modules. The UI components need to provide a smooth user experience for selecting employees from batch results. The complexity is lower than other tasks as it primarily involves data loading and navigation rather than complex calculations or data manipulation."
+    },
+    {
+      "taskId": 9,
+      "taskTitle": "Implement Individual Compensation Calculator - Input Panel and Real-time Calculation",
+      "complexityScore": 7,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the Individual Calculator Input Panel implementation into subtasks covering: 1) Input controls for all compensation components, 2) Real-time calculation engine integration, 3) Input validation and constraints, and 4) State management for calculation parameters. For each subtask, include details on the reactive update mechanism, validation rules, and performance considerations for real-time updates.",
+      "reasoning": "This task involves creating a sophisticated input panel with real-time calculation updates. It requires implementing numerous input controls with validation, maintaining consistent state, and ensuring responsive performance. The real-time calculation aspect adds significant complexity, as changes to any parameter must immediately update the calculation results. The interdependencies between parameters (e.g., weights summing to 100%) further increase complexity."
+    },
+    {
+      "taskId": 10,
+      "taskTitle": "Implement Individual Compensation Calculator - Results Display and Visualization",
+      "complexityScore": 6,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Divide the Individual Calculator Results Display implementation into subtasks covering: 1) Final bonus amount display with formatting, 2) Detailed calculation breakdown component, 3) Policy alerts and notifications, and 4) Export functionality. For each subtask, specify the display requirements, user interaction patterns, and integration with the calculation engine.",
+      "reasoning": "This task focuses on clearly presenting calculation results with appropriate formatting and detail. It requires implementing a breakdown of calculation steps, policy alerts, and export functionality. While not as complex as the calculation engine itself, it still requires careful attention to detail in presenting the information clearly and ensuring the export functionality works correctly. The optional visualization components would add complexity if implemented."
+    },
+    {
+      "taskId": 11,
+      "taskTitle": "Implement Scenario Playground Module - Data Seeding",
+      "complexityScore": 6,
+      "recommendedSubtasks": 3,
+      "expansionPrompt": "Break down the Scenario Playground Data Seeding implementation into subtasks covering: 1) Data source selection interface, 2) Backend API endpoints for scenario creation and retrieval, and 3) State initialization with seeded data. For each subtask, detail the data flow, error handling, and integration with the batch processing and individual calculator modules.",
+      "reasoning": "This task involves creating the foundation for the Scenario Playground by implementing data seeding functionality. It requires effective state management and API integration to load data from batch results. The complexity comes from ensuring proper data transfer between modules and initializing the scenario state correctly. The UI components need to provide a clear interface for selecting data sources."
+    },
+    {
+      "taskId": 12,
+      "taskTitle": "Implement Scenario Playground Module - Parameter Adjustment and Impact Assessment",
+      "complexityScore": 7,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Divide the Scenario Parameter Adjustment implementation into subtasks covering: 1) Parameter adjustment interface with validation, 2) Real-time recalculation for the entire dataset, 3) Summary statistics updates, and 4) Performance optimization for large datasets. For each subtask, include details on the user interaction model, calculation strategy, and performance considerations.",
+      "reasoning": "This task involves creating an interface for adjusting global parameters and assessing their impact on an entire dataset. The real-time recalculation aspect adds significant complexity, especially for large datasets. The UI must handle interdependent parameters (e.g., weights summing to 100%) and provide immediate feedback on changes. Performance optimization is crucial to ensure a responsive experience even with large datasets."
+    },
+    {
+      "taskId": 13,
+      "taskTitle": "Implement Scenario Playground Module - Scenario Management and Comparison",
+      "complexityScore": 6,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the Scenario Management and Comparison implementation into subtasks covering: 1) Scenario saving and metadata management, 2) Scenario loading functionality, 3) Comparison view between scenarios, and 4) Versioning or audit trail implementation. For each subtask, detail the data structures, user interface components, and backend integration requirements.",
+      "reasoning": "This task focuses on managing and comparing scenarios in the Playground. It requires implementing functionality to save, load, and compare different parameter sets and their results. The complexity comes from managing scenario metadata, implementing effective comparison views, and maintaining version history or audit trails. The UI components need to provide a clear interface for these operations."
+    },
+    {
+      "taskId": 14,
+      "taskTitle": "Implement Scenario Playground Module - Visualizations and Reporting",
+      "complexityScore": 7,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Divide the Scenario Visualizations and Reporting implementation into subtasks covering: 1) Bonus distribution histogram components, 2) Team-level aggregation charts, 3) Summary statistics display, and 4) Export functionality for scenario data. For each subtask, specify the visualization requirements, data transformation needs, and user interaction patterns.",
+      "reasoning": "This task involves creating sophisticated data visualizations and reporting capabilities for the Scenario Playground. It requires implementing various chart types, calculating summary statistics, and providing export functionality. The complexity comes from transforming raw scenario data into appropriate formats for visualization, ensuring charts are responsive and informative, and implementing comprehensive export options. The integration with charting libraries adds technical complexity."
+    },
+    {
+      "taskId": 15,
+      "taskTitle": "Implement Session Management and Application Workflow",
+      "complexityScore": 8,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Break down the Session Management and Application Workflow implementation into subtasks covering: 1) Anonymous session creation and management, 2) Navigation and workflow between application modules, 3) Data association with sessions, 4) Session expiration and cleanup, and 5) Data retention policy implementation. For each subtask, include security considerations, user experience flow, and integration requirements across all modules.",
+      "reasoning": "This is a high-complexity task that ties together all other modules through session management and application workflow. It requires implementing secure session handling, complex navigation paths between modules, and comprehensive data cleanup policies. The task touches all parts of the application and must ensure data integrity across the entire user journey. The session cleanup process is particularly complex, requiring careful deletion of all associated data in the correct order."
+    }
+  ]
+}

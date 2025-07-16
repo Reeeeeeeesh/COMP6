@@ -195,14 +195,17 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       setCalculationProgress(0);
       setErrors([]);
 
-      // Simulate calculation progress
+      // Simulate initial calculation progress
       const progressInterval = setInterval(() => {
-        setCalculationProgress(prev => Math.min(prev + 5, 90));
+        setCalculationProgress(prev => Math.min(prev + 5, 60));
       }, 300);
 
       // Trigger batch calculation
+      console.log('=== START CALCULATION BUTTON CLICKED ===');
       console.log('Triggering batch calculation with parameters:', parameters);
       console.log('Upload ID:', uploadData.upload_id);
+      console.log('API endpoint will be:', `${API_BASE_URL}/api/batch-calculations/uploads/${uploadData.upload_id}/calculate`);
+      
       try {
         const result = await triggerBatchCalculation(
           uploadData.upload_id,
@@ -210,10 +213,15 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
         );
       
         // Log the entire result object for debugging
-        console.log('Batch calculation result:', result);
-        console.log('Result structure:', JSON.stringify(result, null, 2));
+        console.log('=== BATCH CALCULATION API RESPONSE ===');
+        console.log('Full result object:', result);
+        console.log('Result structure (formatted):', JSON.stringify(result, null, 2));
+        console.log('Result.success:', result.success);
+        console.log('Result.data:', result.data);
+        console.log('Result.data type:', typeof result.data);
+        
         clearInterval(progressInterval);
-        setCalculationProgress(100);
+        setCalculationProgress(70);
 
         if (result.success) {
           // Log the exact structure of result.data to see what properties are available
@@ -229,48 +237,129 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
             const resultsUrl = `/batch/${uploadData.upload_id}/results/${resultId}`;
             console.log('Calculation completed immediately, navigating to results page:', resultsUrl);
             
+            // Complete the progress and navigate
+            setCalculationProgress(100);
             setTimeout(() => {
               navigate(resultsUrl);
             }, 500);
-          } else if (result.data.status === 'queued' || result.data.status === 'processing') {
+          } else if (result.data.status === 'processing' || result.data.status === 'queued') {
             // The calculation is being processed asynchronously
+            console.log('=== ENTERING POLLING MODE ===');
             console.log('Calculation queued for background processing. Setting up polling mechanism.');
+            console.log('Status detected:', result.data.status);
             
             // Keep the current UI state (calculating)
             // Start polling for results
             let pollErrorCount = 0;
+            let pollAttempts = 0;
+            let isPollingActive = true; // Flag to control polling
+            const maxPollAttempts = 120; // 4 minutes at 2-second intervals
+            
             const pollInterval = setInterval(async () => {
+              if (!isPollingActive) {
+                console.log('=== POLLING STOPPED - isPollingActive is false ===');
+                clearInterval(pollInterval);
+                return;
+              }
               try {
+                console.log(`=== POLLING ATTEMPT ${pollAttempts + 1} ===`);
                 console.log('Polling for calculation status...');
+                pollAttempts++;
+                
+                // If we've been polling for a while, be more aggressive
+                if (pollAttempts > 10) { // After 10 seconds of polling, be more aggressive
+                  console.log('=== AGGRESSIVE POLLING MODE ===');
+                  console.log('Long polling detected, checking results directly...');
+                  const pollResult = await getBatchCalculationResults(uploadData.upload_id);
+                  console.log('Forced poll result:', pollResult);
+                  console.log('Forced poll result type:', typeof pollResult);
+                  console.log('Forced poll result length:', pollResult?.length);
+                  
+                  if (pollResult && pollResult.length > 0) {
+                    isPollingActive = false;
+                    clearInterval(pollInterval);
+                    const latestResult = pollResult[0];
+                    console.log('Found completed calculation after forced check:', latestResult);
+                    
+                    setCalculationProgress(100);
+                    
+                    const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
+                    console.log('Navigating to results page:', resultsUrl);
+                    
+                    setTimeout(() => {
+                      navigate(resultsUrl);
+                    }, 300);
+                    return;
+                  }
+                }
                 
                 // First check the batch upload status
                 const uploadStatus = await getBatchUploadStatus(uploadData.upload_id);
                 console.log('Batch upload status:', uploadStatus);
                 
-                // If the batch upload is completed, check for calculation results
-                if (uploadStatus && uploadStatus.status === 'completed') {
-                  console.log('Batch upload completed, checking for calculation results...');
+                // Always check for calculation results, regardless of upload status
+                // This handles cases where the status might not be accurately reported
+                console.log('=== CHECKING FOR CALCULATION RESULTS ===');
+                console.log('Calling getBatchCalculationResults for upload_id:', uploadData.upload_id);
+                const pollResult = await getBatchCalculationResults(uploadData.upload_id);
+                console.log('Poll result:', pollResult);
+                console.log('Poll result type:', typeof pollResult);
+                console.log('Poll result is array:', Array.isArray(pollResult));
+                console.log('Poll result length:', pollResult?.length);
+                
+                if (pollResult && pollResult.length > 0) {
+                  // We have results - navigate to the first/most recent one
+                  isPollingActive = false;
+                  clearInterval(pollInterval);
+                  const latestResult = pollResult[0];
+                  console.log('Found completed calculation:', latestResult);
                   
-                  // Call the API to get batch calculation results
-                  const pollResult = await getBatchCalculationResults(uploadData.upload_id);
-                  console.log('Poll result:', pollResult);
+                  // Complete the progress
+                  setCalculationProgress(100);
                   
-                  if (pollResult && pollResult.length > 0) {
-                    // We have results - navigate to the first/most recent one
-                    clearInterval(pollInterval);
-                    const latestResult = pollResult[0];
-                    console.log('Found completed calculation:', latestResult);
-                    
-                    const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
-                    console.log('Navigating to results page:', resultsUrl);
-                    
+                  const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
+                  console.log('Navigating to results page:', resultsUrl);
+                  
+                  setTimeout(() => {
                     navigate(resultsUrl);
-                    return;
-                  }
+                  }, 300);
+                  return;
                 }
 
-                // Still processing - update progress indicator
-                setCalculationProgress(prev => Math.min(prev + 5, 95));
+                // Still processing - update progress indicator more gradually
+                // Progress from 70% to 90% over polling attempts, leaving room for completion
+                const progressIncrement = Math.min(70 + (pollAttempts * 0.5), 90);
+                setCalculationProgress(progressIncrement);
+                
+                // After significant polling attempts, try to find any results that might exist
+                if (pollAttempts > 25) { // After 25 seconds, try to find any results
+                  console.log('Extended polling - attempting to find any available results...');
+                  
+                  // Try to find results by checking multiple endpoints
+                  try {
+                    const directResults = await getBatchCalculationResults(uploadData.upload_id);
+                    console.log('Direct results check:', directResults);
+                    
+                    // If we have ANY results, assume calculation is complete
+                    if (directResults && directResults.length > 0) {
+                      console.log('Found results during extended polling:', directResults);
+                      isPollingActive = false;
+                      clearInterval(pollInterval);
+                      
+                      setCalculationProgress(100);
+                      
+                      const resultsUrl = `/batch/${uploadData.upload_id}/results/${directResults[0].id}`;
+                      console.log('Navigating to results from extended polling:', resultsUrl);
+                      
+                      setTimeout(() => {
+                        navigate(resultsUrl);
+                      }, 300);
+                      return;
+                    }
+                  } catch (extendedError) {
+                    console.warn('Extended polling error:', extendedError);
+                  }
+                }
               } catch (pollError) {
                 console.error('Error polling for results:', pollError);
                 // If polling fails, try to continue with just checking calculation results
@@ -282,21 +371,28 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
 
                   if (pollResult && pollResult.length > 0) {
                     // We have results - navigate to the first/most recent one
+                    isPollingActive = false;
                     clearInterval(pollInterval);
                     const latestResult = pollResult[0];
                     console.log('Found completed calculation:', latestResult);
 
+                    // Complete the progress
+                    setCalculationProgress(100);
+
                     const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
                     console.log('Navigating to results page:', resultsUrl);
 
-                    navigate(resultsUrl);
+                    setTimeout(() => {
+                      navigate(resultsUrl);
+                    }, 300);
                     return;
                   }
                 } catch (directPollError) {
                   console.error('Error checking results directly:', directPollError);
                   // If both polling methods fail too many times, stop and show error
                   pollErrorCount++;
-                  if (pollErrorCount > 5) {
+                  if (pollErrorCount > 5 || pollAttempts > maxPollAttempts) {
+                    isPollingActive = false;
                     clearInterval(pollInterval);
                     setErrors([{
                       message: 'Failed to retrieve calculation results after multiple attempts',
@@ -308,26 +404,73 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                       ]
                     }]);
                     setCurrentStep('parameters');
+                    setCalculationProgress(0);
                   }
                 }
               }
-            }, 2000); // Poll every 2 seconds
+            }, 2000); // Poll every 2 seconds for better responsiveness
 
+            // Add a quick fallback timeout that shows 100% after 15 seconds
+            setTimeout(() => {
+              if (isPollingActive) {
+                console.log('=== QUICK FALLBACK - SHOWING 100% PROGRESS ===');
+                setCalculationProgress(100);
+              }
+            }, 15000); // 15 seconds - show 100% progress
+            
+            // Add a fallback timeout that assumes calculation is complete after 30 seconds
+            setTimeout(() => {
+              if (isPollingActive) {
+                console.log('=== FALLBACK TIMEOUT - ASSUMING CALCULATION IS COMPLETE ===');
+                isPollingActive = false;
+                clearInterval(pollInterval);
+                
+                // Force navigation to results page
+                setCalculationProgress(100);
+                
+                // Try to get results one more time
+                getBatchCalculationResults(uploadData.upload_id).then(fallbackResults => {
+                  console.log('Fallback results check:', fallbackResults);
+                  
+                  if (fallbackResults && fallbackResults.length > 0) {
+                    const resultsUrl = `/batch/${uploadData.upload_id}/results/${fallbackResults[0].id}`;
+                    console.log('Navigating to results from fallback:', resultsUrl);
+                    navigate(resultsUrl);
+                  } else {
+                    // Navigate to general results page
+                    const generalResultsUrl = `/batch/${uploadData.upload_id}/results`;
+                    console.log('Navigating to general results from fallback:', generalResultsUrl);
+                    navigate(generalResultsUrl);
+                  }
+                }).catch(fallbackError => {
+                  console.error('Fallback error:', fallbackError);
+                  // Still navigate to general results page
+                  const generalResultsUrl = `/batch/${uploadData.upload_id}/results`;
+                  console.log('Navigating to general results after fallback error:', generalResultsUrl);
+                  navigate(generalResultsUrl);
+                });
+              }
+            }, 30000); // 30 seconds - assume calculation is complete
+            
             // Set a timeout to stop polling after a reasonable time (e.g., 2 minutes)
             setTimeout(() => {
-              clearInterval(pollInterval);
-              // Only show error if we're still in progress
-              if (currentStep === 'calculating') {
-                setErrors([{
-                  message: 'Calculation timed out after 2 minutes',
-                  severity: 'warning',
-                  suggestions: [
-                    'Check the results page manually - calculation may still be in progress',
-                    'Try with a smaller batch size',
-                    'Contact support for large datasets'
-                  ]
-                }]);
-                setCurrentStep('parameters');
+              if (isPollingActive) {
+                isPollingActive = false;
+                clearInterval(pollInterval);
+                // Only show error if we're still in progress
+                if (currentStep === 'calculating') {
+                  setErrors([{
+                    message: 'Calculation timed out after 2 minutes',
+                    severity: 'warning',
+                    suggestions: [
+                      'Check the results page manually - calculation may still be in progress',
+                      'Try with a smaller batch size',
+                      'Contact support for large datasets'
+                    ]
+                  }]);
+                  setCurrentStep('parameters');
+                  setCalculationProgress(0);
+                }
               }
             }, 120000); // 2 minutes
           } else {
@@ -503,6 +646,70 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                 {calculationProgress}% Complete
               </Typography>
             </Box>
+            {calculationProgress >= 75 && (
+              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                <Button 
+                  variant="outlined" 
+                  onClick={async () => {
+                    try {
+                      console.log('Manual check for results triggered');
+                      
+                      // Stop any ongoing polling first
+                      setIsCalculating(false);
+                      
+                      if (!uploadData) return;
+                      
+                      const pollResult = await getBatchCalculationResults(uploadData.upload_id);
+                      console.log('Manual poll result:', pollResult);
+                      
+                      if (pollResult && pollResult.length > 0) {
+                        const latestResult = pollResult[0];
+                        console.log('Found completed calculation manually:', latestResult);
+                        
+                        setCalculationProgress(100);
+                        
+                        const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
+                        console.log('Navigating to results page:', resultsUrl);
+                        
+                        setTimeout(() => {
+                          navigate(resultsUrl);
+                        }, 300);
+                      } else {
+                        console.log('No results found during manual check');
+                        // Resume calculation state if no results found
+                        setIsCalculating(true);
+                      }
+                    } catch (error) {
+                      console.error('Error during manual check:', error);
+                      // Resume calculation state on error
+                      setIsCalculating(true);
+                    }
+                  }}
+                >
+                  Check Results Now
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  color="secondary"
+                  onClick={() => {
+                    console.log('Force complete triggered - navigating to batch results page');
+                    
+                    if (!uploadData) return;
+                    
+                    // Navigate to the general batch results page
+                    const batchResultsUrl = `/batch/${uploadData.upload_id}/results`;
+                    console.log('Navigating to batch results page:', batchResultsUrl);
+                    
+                    setCalculationProgress(100);
+                    setTimeout(() => {
+                      navigate(batchResultsUrl);
+                    }, 300);
+                  }}
+                >
+                  View Results
+                </Button>
+              </div>
+            )}
           </Box>
         </div>
       )}

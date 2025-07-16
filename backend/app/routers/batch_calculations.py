@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 @router.post("/uploads/{upload_id}/calculate", response_model=ApiResponse)
 async def trigger_batch_calculation(
     upload_id: str,
+    background_tasks: BackgroundTasks,
     parameters: Optional[BatchParameters] = None,
     create_scenario: bool = False,
     scenario_name: Optional[str] = None,
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -66,38 +66,23 @@ async def trigger_batch_calculation(
         calculation_service = BatchCalculationService(db)
         
         # Start calculation in background task
-        if background_tasks:
-            # Update status to indicate processing will start
-            batch_upload.status = "queued"
-            db.commit()
-            
-            background_tasks.add_task(
-                calculation_service.calculate_batch,
-                upload_id,
-                parameters,
-                create_scenario,
-                scenario_name
-            )
-            
-            return ApiResponse(
-                success=True,
-                message="Batch calculation started in background",
-                data={"upload_id": upload_id, "status": "queued"}
-            )
-        else:
-            # Run calculation synchronously
-            batch_result, _ = await calculation_service.calculate_batch(
-                upload_id,
-                parameters,
-                create_scenario,
-                scenario_name
-            )
-            
-            return ApiResponse(
-                success=True,
-                message="Batch calculation completed",
-                data={"batch_result_id": batch_result.id, "upload_id": upload_id}
-            )
+        # Update status to indicate processing will start
+        batch_upload.status = "processing"
+        db.commit()
+        
+        background_tasks.add_task(
+            calculation_service.calculate_batch,
+            upload_id,
+            parameters,
+            create_scenario,
+            scenario_name
+        )
+        
+        return ApiResponse(
+            success=True,
+            message="Batch calculation started in background",
+            data={"upload_id": upload_id, "status": "processing"}
+        )
             
     except ValueError as e:
         logger.error(f"Validation error in batch calculation: {str(e)}")

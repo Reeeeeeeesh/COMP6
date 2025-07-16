@@ -82,12 +82,19 @@ export const triggerBatchCalculation = async (
  */
 export const getBatchCalculationResults = async (uploadId: string) => {
   try {
-    const response = await axios.get(
-      `${API_BASE_URL}/api/batch-calculations/uploads/${uploadId}/results`
-    );
+    const endpoint = `${API_BASE_URL}/api/batch-calculations/uploads/${uploadId}/results`;
+    console.log('=== getBatchCalculationResults CALLED ===');
+    console.log('Endpoint:', endpoint);
+    console.log('Upload ID:', uploadId);
+    
+    const response = await axios.get(endpoint);
     
     // Log the raw response for debugging
-    console.log('Raw response from getBatchCalculationResults:', response.data);
+    console.log('=== RAW API RESPONSE ===');
+    console.log('Response status:', response.status);
+    console.log('Response data:', response.data);
+    console.log('Response data type:', typeof response.data);
+    console.log('Response data is array:', Array.isArray(response.data));
     
     // Handle different response formats
     // 1. Direct array response
