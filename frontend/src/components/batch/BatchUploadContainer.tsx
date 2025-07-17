@@ -254,6 +254,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
             let pollAttempts = 0;
             let isPollingActive = true; // Flag to control polling
             const maxPollAttempts = 120; // 4 minutes at 2-second intervals
+            let quickFallbackTimeout: number;
             
             const pollInterval = setInterval(async () => {
               if (!isPollingActive) {
@@ -277,21 +278,24 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                 
                 if (currentPollResult && currentPollResult.length > 0) {
                   // We have results - navigate to the first/most recent one
+                  console.log('Found completed calculation:', currentPollResult[0]);
                   isPollingActive = false;
                   clearInterval(pollInterval);
-                  const latestResult = currentPollResult[0];
-                  console.log('Found completed calculation:', latestResult);
                   
-                  // Complete the progress
+                  // Clear the fallback timeout to prevent it from interfering
+                  clearTimeout(quickFallbackTimeout);
+                  
+                  // Complete the progress and keep it at 100%
                   setCalculationProgress(100);
                   
+                  const latestResult = currentPollResult[0];
                   const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
                   console.log('Navigating to results page:', resultsUrl);
                   
                   setTimeout(() => {
                     navigate(resultsUrl);
-                  }, 300);
-                  return;
+                  }, 500); // Slightly longer delay to ensure progress shows
+                  return; // Exit immediately - don't run any more polling logic
                 }
 
                 // If we've been polling for a while, be more aggressive
@@ -332,10 +336,12 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                   console.warn('Could not get upload status:', statusError);
                 }
 
-                // Still processing - update progress indicator more gradually
+                // Still processing - update progress indicator more gradually ONLY if we haven't found results
                 // Progress from 70% to 90% over polling attempts, leaving room for completion
-                const progressIncrement = Math.min(70 + (pollAttempts * 0.5), 90);
-                setCalculationProgress(progressIncrement);
+                if (isPollingActive) {
+                  const progressIncrement = Math.min(70 + (pollAttempts * 0.5), 90);
+                  setCalculationProgress(progressIncrement);
+                }
                 
                 // After significant polling attempts, try to find any results that might exist
                 if (pollAttempts > 25) { // After 25 seconds, try to find any results
@@ -377,21 +383,21 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
 
                   if (pollResult && pollResult.length > 0) {
                     // We have results - navigate to the first/most recent one
+                    console.log('Found completed calculation in error recovery:', pollResult[0]);
                     isPollingActive = false;
                     clearInterval(pollInterval);
-                    const latestResult = pollResult[0];
-                    console.log('Found completed calculation:', latestResult);
-
-                    // Complete the progress
+                    
+                    // Complete the progress and keep it at 100%
                     setCalculationProgress(100);
-
+                    
+                    const latestResult = pollResult[0];
                     const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
-                    console.log('Navigating to results page:', resultsUrl);
+                    console.log('Navigating to results page from error recovery:', resultsUrl);
 
                     setTimeout(() => {
                       navigate(resultsUrl);
-                    }, 300);
-                    return;
+                    }, 500); // Longer delay to ensure progress shows
+                    return; // Exit immediately
                   }
                 } catch (directPollError) {
                   console.error('Error checking results directly:', directPollError);
@@ -417,7 +423,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
             }, 2000); // Poll every 2 seconds for better responsiveness
 
             // Add a quick fallback timeout that shows 100% after 15 seconds
-            setTimeout(() => {
+            quickFallbackTimeout = setTimeout(() => {
               if (isPollingActive) {
                 console.log('=== QUICK FALLBACK - SHOWING 100% PROGRESS ===');
                 setCalculationProgress(100);
