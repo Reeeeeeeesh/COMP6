@@ -266,52 +266,20 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                 console.log('Polling for calculation status...');
                 pollAttempts++;
                 
-                // If we've been polling for a while, be more aggressive
-                if (pollAttempts > 10) { // After 10 seconds of polling, be more aggressive
-                  console.log('=== AGGRESSIVE POLLING MODE ===');
-                  console.log('Long polling detected, checking results directly...');
-                  const pollResult = await getBatchCalculationResults(uploadData.upload_id);
-                  console.log('Forced poll result:', pollResult);
-                  console.log('Forced poll result type:', typeof pollResult);
-                  console.log('Forced poll result length:', pollResult?.length);
-                  
-                  if (pollResult && pollResult.length > 0) {
-                    isPollingActive = false;
-                    clearInterval(pollInterval);
-                    const latestResult = pollResult[0];
-                    console.log('Found completed calculation after forced check:', latestResult);
-                    
-                    setCalculationProgress(100);
-                    
-                    const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
-                    console.log('Navigating to results page:', resultsUrl);
-                    
-                    setTimeout(() => {
-                      navigate(resultsUrl);
-                    }, 300);
-                    return;
-                  }
-                }
-                
-                // First check the batch upload status
-                const uploadStatus = await getBatchUploadStatus(uploadData.upload_id);
-                console.log('Batch upload status:', uploadStatus);
-                
-                // Always check for calculation results, regardless of upload status
-                // This handles cases where the status might not be accurately reported
+                // Always check for results on every poll attempt
                 console.log('=== CHECKING FOR CALCULATION RESULTS ===');
                 console.log('Calling getBatchCalculationResults for upload_id:', uploadData.upload_id);
-                const pollResult = await getBatchCalculationResults(uploadData.upload_id);
-                console.log('Poll result:', pollResult);
-                console.log('Poll result type:', typeof pollResult);
-                console.log('Poll result is array:', Array.isArray(pollResult));
-                console.log('Poll result length:', pollResult?.length);
+                const currentPollResult = await getBatchCalculationResults(uploadData.upload_id);
+                console.log('Poll result:', currentPollResult);
+                console.log('Poll result type:', typeof currentPollResult);
+                console.log('Poll result is array:', Array.isArray(currentPollResult));
+                console.log('Poll result length:', currentPollResult?.length);
                 
-                if (pollResult && pollResult.length > 0) {
+                if (currentPollResult && currentPollResult.length > 0) {
                   // We have results - navigate to the first/most recent one
                   isPollingActive = false;
                   clearInterval(pollInterval);
-                  const latestResult = pollResult[0];
+                  const latestResult = currentPollResult[0];
                   console.log('Found completed calculation:', latestResult);
                   
                   // Complete the progress
@@ -324,6 +292,44 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                     navigate(resultsUrl);
                   }, 300);
                   return;
+                }
+
+                // If we've been polling for a while, be more aggressive
+                if (pollAttempts > 5) { // After 10 seconds of polling, be more aggressive
+                  console.log('=== AGGRESSIVE POLLING MODE ===');
+                  console.log('Long polling detected, checking results directly with retry...');
+                  
+                  // Try multiple times in quick succession
+                  for (let retry = 0; retry < 3; retry++) {
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between retries
+                    const retryResult = await getBatchCalculationResults(uploadData.upload_id);
+                    console.log(`Retry ${retry + 1} result:`, retryResult);
+                    
+                    if (retryResult && retryResult.length > 0) {
+                      isPollingActive = false;
+                      clearInterval(pollInterval);
+                      const latestResult = retryResult[0];
+                      console.log('Found completed calculation after retry:', latestResult);
+                      
+                      setCalculationProgress(100);
+                      
+                      const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
+                      console.log('Navigating to results page:', resultsUrl);
+                      
+                      setTimeout(() => {
+                        navigate(resultsUrl);
+                      }, 300);
+                      return;
+                    }
+                  }
+                }
+                
+                // First check the batch upload status for logging purposes
+                try {
+                  const uploadStatus = await getBatchUploadStatus(uploadData.upload_id);
+                  console.log('Batch upload status:', uploadStatus);
+                } catch (statusError) {
+                  console.warn('Could not get upload status:', statusError);
                 }
 
                 // Still processing - update progress indicator more gradually

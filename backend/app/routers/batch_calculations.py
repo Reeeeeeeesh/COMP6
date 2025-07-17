@@ -62,21 +62,33 @@ async def trigger_batch_calculation(
         )
     
     try:
-        # Initialize batch calculation service
-        calculation_service = BatchCalculationService(db)
-        
-        # Start calculation in background task
         # Update status to indicate processing will start
         batch_upload.status = "processing"
         db.commit()
         
-        background_tasks.add_task(
-            calculation_service.calculate_batch,
-            upload_id,
-            parameters,
-            create_scenario,
-            scenario_name
-        )
+        # Create a background task wrapper that creates its own database session
+        async def background_calculation_task():
+            """Background task wrapper that creates its own database session"""
+            from ..database import SessionLocal
+            task_db = SessionLocal()
+            try:
+                logger.info(f"Starting background calculation task for upload {upload_id}")
+                calculation_service = BatchCalculationService(task_db)
+                batch_result, employee_results = await calculation_service.calculate_batch(
+                    upload_id,
+                    parameters,
+                    create_scenario,
+                    scenario_name
+                )
+                logger.info(f"Background calculation completed successfully for upload {upload_id}")
+            except Exception as e:
+                logger.exception(f"Background calculation failed for upload {upload_id}: {str(e)}")
+                # The calculate_batch method already handles updating the status to failed
+            finally:
+                task_db.close()
+        
+        # Start calculation in background task
+        background_tasks.add_task(background_calculation_task)
         
         return ApiResponse(
             success=True,
