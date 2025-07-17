@@ -4,7 +4,7 @@ import { FileUpload } from './FileUpload';
 import { FilePreview } from './FilePreview';
 import { UploadProgress } from './UploadProgress';
 import { BatchParameterConfig, BatchParameters } from './BatchParameterConfig';
-import { triggerBatchCalculation, getBatchCalculationResults, getBatchUploadStatus } from '../../services/batchCalculationService';
+import { triggerBatchCalculation, getBatchCalculationResults, getBatchUploadStatus, updateBatchParameters } from '../../services/batchCalculationService';
 import { Button, CircularProgress, Box, Typography, LinearProgress } from '@mui/material';
 import { CalculateOutlined } from '@mui/icons-material';
 import { API_BASE_URL } from '../../config';
@@ -174,9 +174,47 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   }, []);
 
 
-  const handleParametersUpdate = useCallback((newParameters: BatchParameters) => {
-    setParameters(newParameters);
-  }, []);
+  const handleParametersUpdate = useCallback(async (newParameters: BatchParameters) => {
+    console.log('=== APPLYING PARAMETERS ===');
+    console.log('New parameters:', newParameters);
+    
+    if (!uploadData) {
+      console.error('No upload data available for parameter update');
+      setErrors([{
+        message: 'No upload data available',
+        severity: 'error',
+        suggestions: ['Please upload a file first before setting parameters']
+      }]);
+      return;
+    }
+    
+    try {
+      setErrors([]); // Clear any existing errors
+      
+      // Save parameters to backend
+      console.log('Saving parameters to backend for upload:', uploadData.upload_id);
+      const updatedUpload = await updateBatchParameters(uploadData.upload_id, newParameters);
+      console.log('Parameters saved successfully:', updatedUpload);
+      
+      // Update local state
+      setParameters(newParameters);
+      
+      // Show success message (optional)
+      console.log('Parameters applied successfully');
+      
+    } catch (error) {
+      console.error('Failed to save parameters:', error);
+      setErrors([{
+        message: 'Failed to save calculation parameters',
+        severity: 'error',
+        suggestions: [
+          'Check your internet connection',
+          'Try applying the parameters again',
+          'Refresh the page if the problem persists'
+        ]
+      }]);
+    }
+  }, [uploadData]);
 
   const handleStartCalculation = useCallback(async () => {
     console.log('Starting calculation with:', { uploadData, parameters });

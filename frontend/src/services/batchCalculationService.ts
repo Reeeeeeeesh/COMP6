@@ -389,3 +389,38 @@ export const getBatchUploadStatus = async (uploadId: string) => {
     return { status: 'unknown' };
   }
 };
+
+/**
+ * Update batch parameters for a batch upload
+ * @param uploadId ID of the batch upload
+ * @param parameters Batch calculation parameters
+ * @returns Promise with the updated batch upload
+ */
+export const updateBatchParameters = async (uploadId: string, parameters: any) => {
+  try {
+    console.log('=== UPDATING BATCH PARAMETERS ===');
+    console.log('Upload ID:', uploadId);
+    console.log('Parameters:', parameters);
+    
+    const response = await axios.put(
+      `${API_BASE_URL}/api/v1/batch/uploads/${uploadId}/parameters`,
+      parameters,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log('Update batch parameters response:', response.data);
+    
+    if (response.data.success) {
+      return response.data.data;
+    } else {
+      throw new Error(response.data.error || 'Failed to update batch parameters');
+    }
+  } catch (error) {
+    console.error('Error updating batch parameters:', error);
+    throw error;
+  }
+};
