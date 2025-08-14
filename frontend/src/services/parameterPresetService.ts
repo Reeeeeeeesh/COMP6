@@ -62,41 +62,16 @@ export const getParameterPreset = async (presetId: string): Promise<ParameterPre
  * Get the default parameter preset
  */
 export const getDefaultParameterPreset = async (): Promise<ParameterPreset> => {
-  // Try multiple endpoint patterns to handle potential routing mismatches
-  const endpointsToTry = [
-    `${API_BASE_URL}/default`,                   // Original endpoint
-    `${BASE_URL}/api/parameter-presets/default`, // Direct endpoint without v1
-    `${BASE_URL}/parameter-presets/default`      // Endpoint without api prefix
-  ];
-  
-  for (const endpoint of endpointsToTry) {
-    try {
-      console.log('Trying to fetch default parameter preset from:', endpoint);
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        console.warn(`Endpoint ${endpoint} failed: ${response.status} ${response.statusText}`);
-        continue; // Try next endpoint
-      }
-      
-      const data: ApiResponse<ParameterPreset> = await response.json();
-      
-      if (!data.success) {
-        console.warn(`Endpoint ${endpoint} returned unsuccessful response:`, data.message);
-        continue; // Try next endpoint
-      }
-      
-      console.log(`Successfully fetched default preset from ${endpoint}`);
-      return data.data;
-    } catch (error) {
-      console.error(`Error fetching from ${endpoint}:`, error);
-      // Continue to next endpoint
-    }
+  const endpoint = `${API_BASE_URL}/default`;
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch default preset: ${response.status} ${response.statusText}`);
   }
-  
-  // If all endpoints fail, return a fallback preset
-  console.warn('All parameter preset endpoints failed, using fallback preset');
-  return createFallbackPreset();
+  const data: ApiResponse<ParameterPreset> = await response.json();
+  if (!data.success) {
+    throw new Error(data.message || 'Failed to fetch default parameter preset');
+  }
+  return data.data;
 };
 
 /**

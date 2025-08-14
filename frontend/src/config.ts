@@ -3,7 +3,12 @@
  */
 
 // API base URL
-export const API_BASE_URL = 'http://localhost:8000';
+// - If VITE_API_URL is provided, use it (e.g., http://localhost:8000)
+// - Otherwise default to an empty string so calls use relative paths like
+//   `/api/v1/...` which Vite will proxy to the backend (avoids CORS in dev)
+export const API_BASE_URL = (import.meta as any)?.env?.VITE_API_URL
+  ? String((import.meta as any).env.VITE_API_URL).replace(/\/$/, '')
+  : '';
 
 // Default pagination settings
 export const DEFAULT_PAGE_SIZE = 10;

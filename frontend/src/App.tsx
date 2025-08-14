@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'; // Add useState, useEffect
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import { BatchUploadContainer } from './components/batch/BatchUploadContainer';
-import SimpleBatchResults from './components/batch/SimpleBatchResults'; // Reverted to default import
+import BatchResultsDisplay from './components/batch/BatchResultsDisplay';
 import { CalculatorContainer } from './components/individual/CalculatorContainer';
 import { ScenarioPlayground } from './components/scenario/ScenarioPlayground';
 import UserGuide from './components/UserGuide';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { PageTransition } from './components/common/PageTransition';
 import { API_BASE_URL } from './config'; // Import API_BASE_URL for consistent API calls
+import RevenueBandingAdmin from './components/admin/RevenueBandingAdmin';
 
 function App() {
   const [sessionId, setSessionId] = useState<string>('');
@@ -18,7 +19,15 @@ function App() {
   useEffect(() => {
     const initializeSession = async () => {
       try {
-        // Try to create a session with the API - using API_BASE_URL for consistency
+        // For now, skip backend session creation and use temp ID immediately
+        // TODO: Re-enable backend session creation once database issues are resolved
+        const tempId = 'temp-' + Math.random().toString(36).substring(2, 15);
+        setSessionId(tempId);
+        console.log('Using temporary session ID:', tempId);
+        setIsLoading(false);
+        return;
+
+        // Original session creation code (disabled for now)
         const response = await fetch(`${API_BASE_URL}/api/v1/sessions`, {
           method: 'POST',
           headers: {
@@ -189,11 +198,13 @@ function App() {
             } />
             <Route path="/dashboard" element={<PageTransition><Dashboard sessionId={sessionId} /></PageTransition>} />
             <Route path="/batch" element={<PageTransition><BatchUploadContainer sessionId={sessionId} onUploadComplete={handleUploadComplete} onError={handleUploadError} /></PageTransition>} />
-            <Route path="/batch/:uploadId/results/:resultId" element={<PageTransition><SimpleBatchResults /></PageTransition>} />
+            <Route path="/batch/:uploadId/results" element={<PageTransition><BatchResultsDisplay /></PageTransition>} />
+            <Route path="/batch/:uploadId/results/:resultId" element={<PageTransition><BatchResultsDisplay /></PageTransition>} />
             <Route path="/calculator" element={<PageTransition><div className="max-w-4xl mx-auto"><p className="text-center p-8 text-gray-500">Please select an employee from batch results to use the calculator.</p></div></PageTransition>} />
             <Route path="/calculator/:resultId" element={<PageTransition><CalculatorContainer /></PageTransition>} />
             <Route path="/scenarios" element={<PageTransition><ScenarioPlayground sessionId={sessionId} onError={handleUploadError} /></PageTransition>} />
             <Route path="/user-guide" element={<PageTransition><UserGuide /></PageTransition>} />
+            <Route path="/admin/revenue-banding" element={<PageTransition><RevenueBandingAdmin /></PageTransition>} />
           </Routes>
         </Router>
 

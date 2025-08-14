@@ -30,6 +30,7 @@ import {
   ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
 import BatchSummary from './BatchSummary';
+import BonusDistributionVisualization from './BonusDistributionVisualization';
 import { formatCurrency, formatPercentage } from '../../utils/formatters';
 import { getBatchCalculationResults, getEmployeeCalculationResults, exportCalculationResults } from '../../services/batchCalculationService';
 
@@ -259,7 +260,7 @@ const BatchResultsDisplay: React.FC = () => {
   };
   
   const handleBackToUpload = () => {
-    navigate(`/batch/${uploadId}`);
+    navigate('/batch');
   };
   
   const renderSortArrow = (column: string) => {
@@ -325,6 +326,13 @@ const BatchResultsDisplay: React.FC = () => {
           <Box>
             {selectedResult && (
               <BatchSummary batchResultId={selectedResult.id} />
+            )}
+          </Box>
+
+          {/* Bonus Distribution Visualization */}
+          <Box>
+            {selectedResult && (
+              <BonusDistributionVisualization batchResultId={selectedResult.id} />
             )}
           </Box>
           

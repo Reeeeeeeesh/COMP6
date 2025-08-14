@@ -305,63 +305,109 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
                 console.log('Polling for calculation status...');
                 pollAttempts++;
                 
-                // Always check for results on every poll attempt
-                console.log('=== CHECKING FOR CALCULATION RESULTS ===');
-                console.log('Calling getBatchCalculationResults for upload_id:', uploadData.upload_id);
-                const currentPollResult = await getBatchCalculationResults(uploadData.upload_id);
-                console.log('Poll result:', currentPollResult);
-                console.log('Poll result type:', typeof currentPollResult);
-                console.log('Poll result is array:', Array.isArray(currentPollResult));
-                console.log('Poll result length:', currentPollResult?.length);
+                // First check batch upload status to see if processing is complete
+                console.log('=== CHECKING BATCH UPLOAD STATUS ===');
+                console.log('Calling getBatchUploadStatus for upload_id:', uploadData.upload_id);
+                const statusResult = await getBatchUploadStatus(uploadData.upload_id);
+                console.log('Status result:', statusResult);
+                console.log('Current status:', statusResult?.status);
+                console.log('Processed rows:', statusResult?.processed_rows);
+                console.log('Total rows:', statusResult?.total_rows);
                 
-                if (currentPollResult && currentPollResult.length > 0) {
-                  // We have results - navigate to the first/most recent one
-                  console.log('Found completed calculation:', currentPollResult[0]);
-                  isPollingActive = false;
-                  clearInterval(pollInterval);
+                if (statusResult) {
+                  // Update progress based on actual processing progress
+                  if (statusResult.total_rows && statusResult.processed_rows) {
+                    const progressPct = Math.min(95, (statusResult.processed_rows / statusResult.total_rows) * 100);
+                    setCalculationProgress(progressPct);
+                    console.log(`Updated progress to ${progressPct}%`);
+                  }
                   
-                  // Clear the fallback timeout to prevent it from interfering
-                  clearTimeout(quickFallbackTimeout);
-                  
-                  // Complete the progress and keep it at 100%
-                  setCalculationProgress(100);
-                  
-                  const latestResult = currentPollResult[0];
-                  const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
-                  console.log('Navigating to results page:', resultsUrl);
-                  
-                  setTimeout(() => {
-                    navigate(resultsUrl);
-                  }, 500); // Slightly longer delay to ensure progress shows
-                  return; // Exit immediately - don't run any more polling logic
-                }
-
-                // If we've been polling for a while, be more aggressive
-                if (pollAttempts > 5) { // After 10 seconds of polling, be more aggressive
-                  console.log('=== AGGRESSIVE POLLING MODE ===');
-                  console.log('Long polling detected, checking results directly with retry...');
-                  
-                  // Try multiple times in quick succession
-                  for (let retry = 0; retry < 3; retry++) {
-                    await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between retries
-                    const retryResult = await getBatchCalculationResults(uploadData.upload_id);
-                    console.log(`Retry ${retry + 1} result:`, retryResult);
+                  if (statusResult.status === 'completed') {
+                    // Now check for results since processing is complete
+                    console.log('=== PROCESSING COMPLETED - CHECKING FOR RESULTS ===');
+                    console.log('Calling getBatchCalculationResults for upload_id:', uploadData.upload_id);
+                    const currentPollResult = await getBatchCalculationResults(uploadData.upload_id);
+                    console.log('Poll result:', currentPollResult);
+                    console.log('Poll result type:', typeof currentPollResult);
+                    console.log('Poll result is array:', Array.isArray(currentPollResult));
+                    console.log('Poll result length:', currentPollResult?.length);
                     
-                    if (retryResult && retryResult.length > 0) {
+                    if (currentPollResult && currentPollResult.length > 0) {
+                      // We have results - navigate to the first/most recent one
+                      console.log('Found completed calculation:', currentPollResult[0]);
                       isPollingActive = false;
                       clearInterval(pollInterval);
-                      const latestResult = retryResult[0];
-                      console.log('Found completed calculation after retry:', latestResult);
                       
+                      // Clear the fallback timeout to prevent it from interfering
+                      clearTimeout(quickFallbackTimeout);
+                      
+                      // Complete the progress and keep it at 100%
                       setCalculationProgress(100);
                       
+                      const latestResult = currentPollResult[0];
                       const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
                       console.log('Navigating to results page:', resultsUrl);
                       
                       setTimeout(() => {
                         navigate(resultsUrl);
-                      }, 300);
-                      return;
+                      }, 500); // Slightly longer delay to ensure progress shows
+                      return; // Exit immediately - don't run any more polling logic
+                    }
+                  } else if (statusResult.status === 'failed') {
+                    // Processing failed
+                    console.log('=== PROCESSING FAILED ===');
+                    console.log('Error message:', statusResult.error_message);
+                    isPollingActive = false;
+                    clearInterval(pollInterval);
+                    clearTimeout(quickFallbackTimeout);
+                    
+                    setErrors([{
+                      severity: 'error',
+                      message: 'Batch calculation failed',
+                      context: statusResult.error_message || 'Unknown error occurred during processing'
+                    }]);
+                    setIsCalculating(false);
+                    return;
+                  } else if (statusResult.status === 'processing') {
+                    // Still processing, continue polling
+                    console.log('=== STILL PROCESSING ===');
+                    console.log('Continuing to poll...');
+                  }
+                }
+
+                // If we've been polling for a while, be more aggressive with status checking
+                if (pollAttempts > 5) { // After 10 seconds of polling, be more aggressive
+                  console.log('=== AGGRESSIVE POLLING MODE ===');
+                  console.log('Long polling detected, checking status with retry...');
+                  
+                  // Try checking status multiple times in quick succession
+                  for (let retry = 0; retry < 3; retry++) {
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between retries
+                    const retryStatusResult = await getBatchUploadStatus(uploadData.upload_id);
+                    console.log(`Retry ${retry + 1} status result:`, retryStatusResult);
+                    
+                    if (retryStatusResult && retryStatusResult.status === 'completed') {
+                      // Now check for results since processing is complete
+                      console.log('=== RETRY - PROCESSING COMPLETED - CHECKING FOR RESULTS ===');
+                      const retryResult = await getBatchCalculationResults(uploadData.upload_id);
+                      console.log(`Retry ${retry + 1} calculation result:`, retryResult);
+                      
+                      if (retryResult && retryResult.length > 0) {
+                        isPollingActive = false;
+                        clearInterval(pollInterval);
+                        const latestResult = retryResult[0];
+                        console.log('Found completed calculation after retry:', latestResult);
+                        
+                        setCalculationProgress(100);
+                        
+                        const resultsUrl = `/batch/${uploadData.upload_id}/results/${latestResult.id}`;
+                        console.log('Navigating to results page:', resultsUrl);
+                        
+                        setTimeout(() => {
+                          navigate(resultsUrl);
+                        }, 300);
+                        return;
+                      }
                     }
                   }
                 }

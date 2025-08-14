@@ -18,7 +18,7 @@ from ..services.file_processing_service import FileProcessingService
 from ..dal.batch_upload_dal import BatchUploadDAL
 from ..schemas import (
     ApiResponse, BatchUploadResponse, BatchUploadCreate,
-    EmployeeDataResponse
+    EmployeeDataResponse, BatchParameters
 )
 from ..models import EmployeeData
 
@@ -427,6 +427,63 @@ async def list_uploads(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list uploads: {str(e)}"
+        )
+
+
+@router.put("/uploads/{upload_id}/parameters", response_model=ApiResponse)
+async def update_batch_parameters(
+    upload_id: str,
+    parameters: BatchParameters,
+    db: Session = Depends(get_db)
+):
+    """
+    Update calculation parameters for a batch upload.
+    
+    Args:
+        upload_id: Batch upload ID
+        parameters: Calculation parameters to apply
+        db: Database session
+        
+    Returns:
+        ApiResponse confirming parameter update
+    """
+    try:
+        logger.info(f"Updating parameters for batch upload: {upload_id}")
+        logger.info(f"Parameters: {parameters.dict()}")
+        
+        # Get the batch upload DAL
+        batch_dal = BatchUploadDAL(db)
+        
+        # Check if upload exists
+        upload = batch_dal.get(upload_id)
+        if not upload:
+            logger.error(f"Batch upload not found: {upload_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Batch upload not found: {upload_id}"
+            )
+        
+        # Update the parameters
+        upload.calculation_parameters = parameters.dict()
+        db.commit()
+        db.refresh(upload)
+        
+        logger.info(f"Successfully updated parameters for upload: {upload_id}")
+        
+        return ApiResponse(
+            success=True,
+            data={"upload_id": upload_id, "parameters_updated": True},
+            message="Batch parameters updated successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating batch parameters: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update batch parameters: {str(e)}"
         )
 
 

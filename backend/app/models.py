@@ -164,14 +164,6 @@ class ParameterPreset(Base):
     is_default = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Column mapping stored as JSON
-    column_mapping = Column(JSON, nullable=False)
-    
-    # Template metadata
-    is_default = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 class ScenarioAuditLog(Base):
     """Model for auditing scenario changes"""
@@ -190,3 +182,55 @@ class ScenarioAuditLog(Base):
     
     # Relationships
     scenario = relationship("BatchScenario", back_populates="audit_logs")
+
+
+# ==============================================
+# Revenue Banding Models
+# ==============================================
+
+class Team(Base):
+    """Team entity used for revenue banding and grouping."""
+    __tablename__ = "teams"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False, unique=True, index=True)
+    division = Column(String, nullable=True)
+    peer_group = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    revenue_history = relationship(
+        "TeamRevenueHistory",
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
+
+
+class TeamRevenueHistory(Base):
+    """Normalized annual revenue series per team (one row per fiscal year)."""
+    __tablename__ = "team_revenue_history"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    team_id = Column(String, ForeignKey("teams.id"), nullable=False, index=True)
+    fiscal_year = Column(Integer, nullable=False)
+    revenue = Column(Float, nullable=False)
+    currency = Column(String, nullable=True)
+    is_adjusted = Column(Boolean, default=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    # Relationships
+    team = relationship("Team", back_populates="revenue_history")
+
+
+class RevenueBandConfig(Base):
+    """Configuration for revenue banding thresholds, weights, and multipliers."""
+    __tablename__ = "revenue_band_configs"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False, unique=True, index=True)
+    # Flexible settings blob to hold weights, thresholds, multipliers, etc.
+    settings = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

@@ -301,8 +301,13 @@ class DashboardService:
             
             trends = []
             for date, count, employees, avg_bonus in calculations:
+                # date may be a datetime/date or already a string depending on DB backend
+                if hasattr(date, 'strftime'):
+                    date_str = date.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date)
                 trends.append({
-                    'date': date.strftime('%Y-%m-%d'),
+                    'date': date_str,
                     'calculation_count': count,
                     'total_employees': employees or 0,
                     'average_bonus': round(avg_bonus or 0, 2)

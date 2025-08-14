@@ -13,7 +13,7 @@ Key Components:
 - Cap application logic (3x Base Salary and MRT Cap)
 """
 
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Any
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 import logging
@@ -385,6 +385,143 @@ class CalculationEngine:
         except Exception as e:
             logger.error(f"Calculation error: {str(e)}")
             raise ValidationError(f"Calculation failed: {str(e)}")
+
+    @classmethod
+    def determine_salary_range(cls, salary: float) -> str:
+        """
+        Determine salary range category for an employee.
+        
+        Args:
+            salary: Employee's base salary
+            
+        Returns:
+            Salary range string (e.g., "50k-75k", "75k-100k", etc.)
+        """
+        if salary < 25000:
+            return "Under 25k"
+        elif salary < 50000:
+            return "25k-50k"
+        elif salary < 75000:
+            return "50k-75k"
+        elif salary < 100000:
+            return "75k-100k"
+        elif salary < 150000:
+            return "100k-150k"
+        elif salary < 200000:
+            return "150k-200k"
+        else:
+            return "200k+"
+
+    @classmethod
+    def resolve_effective_parameters(
+        cls,
+        category_based_params: Dict[str, Any],
+        employee_department: Optional[str] = None,
+        employee_salary: Optional[float] = None,
+        employee_position: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Resolve effective parameters for an employee based on category-based configuration.
+        
+        Args:
+            category_based_params: Category-based parameter configuration
+            employee_department: Employee's department
+            employee_salary: Employee's base salary
+            employee_position: Employee's position/role
+            
+        Returns:
+            Dictionary of effective parameters for the employee
+        """
+        # If category-based parameters are not enabled, return default parameters
+        if not category_based_params.get('useCategoryBased', False):
+            return category_based_params.get('defaultParameters', {})
+        
+        # Start with default parameters
+        effective_params = category_based_params.get('defaultParameters', {}).copy()
+        
+        # Apply department overrides if available
+        if employee_department and category_based_params.get('departmentOverrides'):
+            dept_overrides = category_based_params['departmentOverrides'].get(employee_department)
+            if dept_overrides:
+                for key, value in dept_overrides.items():
+                    if value is not None:
+                        effective_params[key] = value
+        
+        # Apply salary range overrides if available
+        if employee_salary and category_based_params.get('salaryRangeOverrides'):
+            salary_range = cls.determine_salary_range(employee_salary)
+            range_overrides = category_based_params['salaryRangeOverrides'].get(salary_range)
+            if range_overrides:
+                for key, value in range_overrides.items():
+                    if value is not None:
+                        effective_params[key] = value
+        
+        # Apply position overrides if available
+        if employee_position and category_based_params.get('positionOverrides'):
+            position_overrides = category_based_params['positionOverrides'].get(employee_position)
+            if position_overrides:
+                for key, value in position_overrides.items():
+                    if value is not None:
+                        effective_params[key] = value
+        
+        return effective_params
+
+    @classmethod
+    def create_calculation_inputs_from_category_params(
+        cls,
+        category_based_params: Dict[str, Any],
+        base_salary: float,
+        employee_department: Optional[str] = None,
+        employee_position: Optional[str] = None,
+        is_mrt: bool = False,
+        raf_override: Optional[float] = None,
+        use_bonus_pool_limit: bool = False,
+        total_bonus_pool: Optional[float] = None,
+        total_calculated_bonuses: Optional[float] = None
+    ) -> CalculationInputs:
+        """
+        Create CalculationInputs from category-based parameters for a specific employee.
+        
+        Args:
+            category_based_params: Category-based parameter configuration
+            base_salary: Employee's base salary
+            employee_department: Employee's department
+            employee_position: Employee's position/role
+            is_mrt: Whether employee is Material Risk Taker
+            raf_override: Individual RAF override (takes precedence over category/default RAF)
+            use_bonus_pool_limit: Whether to apply bonus pool limit
+            total_bonus_pool: Total bonus pool amount
+            total_calculated_bonuses: Sum of all calculated bonuses before scaling
+            
+        Returns:
+            CalculationInputs object ready for calculation
+        """
+        # Resolve effective parameters for this employee
+        effective_params = cls.resolve_effective_parameters(
+            category_based_params,
+            employee_department,
+            base_salary,
+            employee_position
+        )
+        
+        # Use RAF override if provided, otherwise use resolved RAF
+        final_raf = raf_override if raf_override is not None else effective_params.get('raf', 1.0)
+        
+        # Create calculation inputs
+        return CalculationInputs(
+            base_salary=base_salary,
+            target_bonus_pct=effective_params.get('targetBonusPct', 0.15),
+            investment_weight=effective_params.get('investmentWeight', 0.6),
+            investment_score_multiplier=effective_params.get('investmentScoreMultiplier', 1.0),
+            qualitative_weight=effective_params.get('qualitativeWeight', 0.4),
+            qual_score_multiplier=effective_params.get('qualScoreMultiplier', 1.0),
+            raf=final_raf,
+            is_mrt=is_mrt,
+            mrt_cap_pct=effective_params.get('mrtCapPct', 2.0) if is_mrt else None,
+            use_bonus_pool_limit=use_bonus_pool_limit,
+            total_bonus_pool=total_bonus_pool,
+            total_calculated_bonuses=total_calculated_bonuses
+        )
 
 
 # Convenience function for simple calculations

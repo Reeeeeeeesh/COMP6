@@ -22,7 +22,7 @@ from ..schemas import (
 from ..services.batch_calculation_service import BatchCalculationService
 
 router = APIRouter(
-    prefix="/api/batch-calculations",
+    prefix="/api/v1/batch-calculations",
     tags=["batch-calculations"],
 )
 
@@ -67,24 +67,43 @@ async def trigger_batch_calculation(
         db.commit()
         
         # Create a background task wrapper that creates its own database session
-        async def background_calculation_task():
+        def background_calculation_task():
             """Background task wrapper that creates its own database session"""
+            import asyncio
             from ..database import SessionLocal
             task_db = SessionLocal()
             try:
-                logger.info(f"Starting background calculation task for upload {upload_id}")
+                logger.info(f"=== BACKGROUND TASK STARTED for upload {upload_id} ===")
+                logger.info(f"Parameters: {parameters}")
+                logger.info(f"Create scenario: {create_scenario}")
+                logger.info(f"Scenario name: {scenario_name}")
+                
                 calculation_service = BatchCalculationService(task_db)
-                batch_result, employee_results = await calculation_service.calculate_batch(
-                    upload_id,
-                    parameters,
-                    create_scenario,
-                    scenario_name
-                )
-                logger.info(f"Background calculation completed successfully for upload {upload_id}")
+                logger.info("BatchCalculationService created, calling calculate_batch...")
+                
+                # Run the async function in a new event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    batch_result, employee_results = loop.run_until_complete(
+                        calculation_service.calculate_batch(
+                            upload_id,
+                            parameters,
+                            create_scenario,
+                            scenario_name
+                        )
+                    )
+                    logger.info(f"=== BACKGROUND CALCULATION COMPLETED for upload {upload_id} ===")
+                    logger.info(f"Batch result ID: {batch_result.id if batch_result else 'None'}")
+                    logger.info(f"Employee results count: {len(employee_results) if employee_results else 0}")
+                finally:
+                    loop.close()
             except Exception as e:
-                logger.exception(f"Background calculation failed for upload {upload_id}: {str(e)}")
+                logger.exception(f"=== BACKGROUND CALCULATION FAILED for upload {upload_id} ===")
+                logger.exception(f"Error details: {str(e)}")
                 # The calculate_batch method already handles updating the status to failed
             finally:
+                logger.info(f"=== BACKGROUND TASK CLEANUP for upload {upload_id} ===")
                 task_db.close()
         
         # Start calculation in background task
@@ -104,7 +123,7 @@ async def trigger_batch_calculation(
         return ApiResponse(success=False, error=f"Error calculating batch: {str(e)}")
 
 
-@router.get("/uploads/{upload_id}/results", response_model=List[BatchCalculationResultResponse])
+@router.get("/uploads/{upload_id}/results", response_model=ApiResponse)
 async def get_batch_calculation_results(
     upload_id: str,
     db: Session = Depends(get_db)
@@ -127,11 +146,15 @@ async def get_batch_calculation_results(
     results = db.query(BatchCalculationResult).filter(
         BatchCalculationResult.batch_upload_id == upload_id
     ).all()
-    
-    return results
+
+    return ApiResponse(
+        success=True,
+        message=f"Found {len(results)} results for upload {upload_id}",
+        data=results
+    )
 
 
-@router.get("/results/{result_id}", response_model=BatchCalculationResultResponse)
+@router.get("/results/{result_id}", response_model=ApiResponse)
 async def get_batch_calculation_result(
     result_id: str,
     db: Session = Depends(get_db)
@@ -152,11 +175,15 @@ async def get_batch_calculation_result(
     
     if not result:
         raise HTTPException(status_code=404, detail=f"Batch calculation result with ID {result_id} not found")
-    
-    return result
+
+    return ApiResponse(
+        success=True,
+        message="Batch calculation result retrieved successfully",
+        data=result
+    )
 
 
-@router.get("/results/{result_id}/employees", response_model=List[EmployeeCalculationResultResponse])
+@router.get("/results/{result_id}/employees", response_model=ApiResponse)
 async def get_employee_calculation_results(
     result_id: str,
     page: int = 1,
@@ -253,11 +280,15 @@ async def get_employee_calculation_results(
     
     # Execute query
     employee_results = query.all()
-    
-    return employee_results
+
+    return ApiResponse(
+        success=True,
+        message=f"Found {len(employee_results)} employee results",
+        data=employee_results
+    )
 
 
-@router.get("/results/{result_id}/summary", response_model=Dict[str, Any])
+@router.get("/results/{result_id}/summary", response_model=ApiResponse)
 async def get_batch_calculation_summary(
     result_id: str,
     db: Session = Depends(get_db)
@@ -338,15 +369,204 @@ async def get_batch_calculation_summary(
                 departments[dept]["total_bonus"] / departments[dept]["total_base_salary"]
             )
     
-    return {
-        "total_employees": total_employees,
-        "total_base_salary": total_base_salary,
-        "total_bonus_amount": total_bonus_amount,
-        "average_bonus_percentage": average_bonus_percentage,
-        "bonus_percentage_distribution": bonus_pct_ranges,
-        "department_statistics": departments,
-        "calculation_parameters": result.calculation_parameters
+    return ApiResponse(
+        success=True,
+        message="Batch calculation summary retrieved successfully",
+        data={
+            "total_employees": total_employees,
+            "total_base_salary": total_base_salary,
+            "total_bonus_amount": total_bonus_amount,
+            "average_bonus_percentage": average_bonus_percentage,
+            "bonus_percentage_distribution": bonus_pct_ranges,
+            "department_statistics": departments,
+            "calculation_parameters": result.calculation_parameters
+        }
+    )
+
+
+@router.get("/results/{result_id}/distribution", response_model=ApiResponse)
+async def get_bonus_distribution_analysis(
+    result_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed bonus distribution analysis for visualization.
+    
+    Args:
+        result_id: ID of the batch calculation result
+        
+    Returns:
+        Dictionary with detailed distribution statistics for charts
+    """
+    # Check if batch calculation result exists
+    result = db.query(BatchCalculationResult).filter(
+        BatchCalculationResult.id == result_id
+    ).first()
+    
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Batch calculation result with ID {result_id} not found")
+    
+    # Get employee results with employee data
+    employee_results = db.query(EmployeeCalculationResult).options(
+        sqlalchemy.orm.joinedload(EmployeeCalculationResult.employee_data)
+    ).filter(
+        EmployeeCalculationResult.batch_result_id == result_id
+    ).all()
+    
+    # Calculate salary range distribution
+    salary_ranges = {
+        "$0-$50k": {"count": 0, "total_bonus": 0, "avg_bonus_pct": 0, "employees": []},
+        "$50k-$75k": {"count": 0, "total_bonus": 0, "avg_bonus_pct": 0, "employees": []},
+        "$75k-$100k": {"count": 0, "total_bonus": 0, "avg_bonus_pct": 0, "employees": []},
+        "$100k-$150k": {"count": 0, "total_bonus": 0, "avg_bonus_pct": 0, "employees": []},
+        "$150k-$200k": {"count": 0, "total_bonus": 0, "avg_bonus_pct": 0, "employees": []},
+        "$200k+": {"count": 0, "total_bonus": 0, "avg_bonus_pct": 0, "employees": []}
     }
+    
+    # Calculate bonus percentage ranges with more granularity
+    bonus_percentage_ranges = {
+        "0-2%": {"count": 0, "employees": []},
+        "2-5%": {"count": 0, "employees": []},
+        "5-10%": {"count": 0, "employees": []},
+        "10-15%": {"count": 0, "employees": []},
+        "15-20%": {"count": 0, "employees": []},
+        "20-25%": {"count": 0, "employees": []},
+        "25-30%": {"count": 0, "employees": []},
+        "30%+": {"count": 0, "employees": []}
+    }
+    
+    # Enhanced department statistics
+    departments = {}
+    
+    for er in employee_results:
+        employee_info = {
+            "id": er.employee_data.employee_id,
+            "name": f"{er.employee_data.first_name} {er.employee_data.last_name}",
+            "department": er.employee_data.department,
+            "salary": er.base_salary,
+            "bonus_amount": er.bonus_amount,
+            "bonus_percentage": er.bonus_percentage
+        }
+        
+        # Categorize by salary range
+        salary = er.base_salary
+        if salary < 50000:
+            range_key = "$0-$50k"
+        elif salary < 75000:
+            range_key = "$50k-$75k"
+        elif salary < 100000:
+            range_key = "$75k-$100k"
+        elif salary < 150000:
+            range_key = "$100k-$150k"
+        elif salary < 200000:
+            range_key = "$150k-$200k"
+        else:
+            range_key = "$200k+"
+        
+        salary_ranges[range_key]["count"] += 1
+        salary_ranges[range_key]["total_bonus"] += er.bonus_amount
+        salary_ranges[range_key]["employees"].append(employee_info)
+        
+        # Categorize by bonus percentage
+        bonus_pct = er.bonus_percentage * 100
+        if bonus_pct < 2:
+            pct_key = "0-2%"
+        elif bonus_pct < 5:
+            pct_key = "2-5%"
+        elif bonus_pct < 10:
+            pct_key = "5-10%"
+        elif bonus_pct < 15:
+            pct_key = "10-15%"
+        elif bonus_pct < 20:
+            pct_key = "15-20%"
+        elif bonus_pct < 25:
+            pct_key = "20-25%"
+        elif bonus_pct < 30:
+            pct_key = "25-30%"
+        else:
+            pct_key = "30%+"
+        
+        bonus_percentage_ranges[pct_key]["count"] += 1
+        bonus_percentage_ranges[pct_key]["employees"].append(employee_info)
+        
+        # Enhanced department statistics
+        dept = er.employee_data.department or "Unknown"
+        if dept not in departments:
+            departments[dept] = {
+                "count": 0,
+                "total_base_salary": 0,
+                "total_bonus": 0,
+                "average_bonus_pct": 0,
+                "employees": [],
+                "salary_distribution": {},
+                "bonus_pct_distribution": {}
+            }
+        
+        departments[dept]["count"] += 1
+        departments[dept]["total_base_salary"] += er.base_salary
+        departments[dept]["total_bonus"] += er.bonus_amount
+        departments[dept]["employees"].append(employee_info)
+    
+    # Calculate averages for salary ranges
+    for range_key in salary_ranges:
+        if salary_ranges[range_key]["count"] > 0:
+            total_salary = sum(emp["salary"] for emp in salary_ranges[range_key]["employees"])
+            salary_ranges[range_key]["avg_bonus_pct"] = (
+                salary_ranges[range_key]["total_bonus"] / total_salary if total_salary > 0 else 0
+            )
+    
+    # Calculate averages for departments
+    for dept in departments:
+        if departments[dept]["total_base_salary"] > 0:
+            departments[dept]["average_bonus_pct"] = (
+                departments[dept]["total_bonus"] / departments[dept]["total_base_salary"]
+            )
+    
+    # Format data for charts
+    salary_range_chart_data = [
+        {
+            "range": range_key,
+            "count": data["count"],
+            "totalBonus": data["total_bonus"],
+            "avgBonusPct": data["avg_bonus_pct"] * 100,
+            "employees": data["employees"]
+        }
+        for range_key, data in salary_ranges.items()
+        if data["count"] > 0
+    ]
+    
+    bonus_pct_chart_data = [
+        {
+            "range": range_key,
+            "count": data["count"],
+            "employees": data["employees"]
+        }
+        for range_key, data in bonus_percentage_ranges.items()
+        if data["count"] > 0
+    ]
+    
+    department_chart_data = [
+        {
+            "department": dept,
+            "count": data["count"],
+            "totalBonus": data["total_bonus"],
+            "avgBonusPct": data["average_bonus_pct"] * 100,
+            "employees": data["employees"]
+        }
+        for dept, data in departments.items()
+    ]
+    
+    return ApiResponse(
+        success=True,
+        message="Bonus distribution analysis retrieved successfully",
+        data={
+            "salary_range_distribution": salary_range_chart_data,
+            "bonus_percentage_distribution": bonus_pct_chart_data,
+            "department_distribution": department_chart_data,
+            "total_employees": len(employee_results),
+            "calculation_parameters": result.calculation_parameters
+        }
+    )
 
 
 @router.post("/results/{result_id}/export", response_model=ApiResponse)

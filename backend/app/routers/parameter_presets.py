@@ -13,13 +13,89 @@ router = APIRouter(
     tags=["parameter-presets"],
 )
 
+
+def _preset_to_dict(preset: ParameterPreset) -> dict:
+    """Convert a SQLAlchemy ParameterPreset model to a Pydantic dict for safe serialization."""
+    return ParameterPresetSchema.model_validate(preset, from_attributes=True).model_dump()
+
+@router.get("/default", response_model=ApiResponse)
+async def get_default_parameter_preset(db: Session = Depends(get_db)):
+    """Get the default parameter preset (creates one if none exist).
+
+    Placed before the '/{preset_id}' route to avoid path parameter matching 'default'.
+    """
+    # Try to find a preset marked as default
+    preset = db.query(ParameterPreset).filter(ParameterPreset.is_default == True).first()
+    
+    # If no default preset exists, try to get any preset
+    if not preset:
+        preset = db.query(ParameterPreset).first()
+    
+    # If still no preset, create a new default preset
+    if not preset:
+        # Create a default preset with standard values
+        from ..schemas import BatchParameters
+        default_params = BatchParameters(
+            targetBonusPct=0.15,
+            investmentWeight=0.6,
+            qualitativeWeight=0.4,
+            investmentScoreMultiplier=1.0,
+            qualScoreMultiplier=1.0,
+            raf=1.0,
+            rafSensitivity=0.2,
+            rafLowerClamp=0,
+            rafUpperClamp=1.5,
+            mrtCapPct=2.0,
+            useDirectRaf=True,
+            baseSalaryCapMultiplier=3.0
+        )
+        
+        # Create the preset in the database
+        preset = ParameterPreset(
+            id=str(uuid.uuid4()),
+            name="Standard Configuration",
+            description="Default parameters for standard bonus calculations",
+            parameters=default_params.dict(),
+            is_default=True
+        )
+        
+        try:
+            db.add(preset)
+            db.commit()
+            db.refresh(preset)
+        except Exception as e:
+            db.rollback()
+            import logging
+            logging.error(f"Error creating default parameter preset: {str(e)}")
+            # Fallback: return an in-memory preset object with minimal fields
+            return {
+                "success": True,
+                "data": {
+                    "id": "default",
+                    "name": "Standard Configuration",
+                    "description": "Default parameters for standard bonus calculations",
+                    "parameters": default_params.dict(),
+                    "is_default": True,
+                    "created_at": None,
+                    "updated_at": None,
+                },
+                "message": "Generated default parameter preset (in-memory)"
+            }
+    
+    return {
+        "success": True,
+        "data": _preset_to_dict(preset),
+        "message": "Default parameter preset retrieved successfully"
+    }
+
 @router.get("/", response_model=ApiResponse)
 async def get_parameter_presets(db: Session = Depends(get_db)):
     """Get all parameter presets"""
     presets = db.query(ParameterPreset).all()
+    presets_data = [_preset_to_dict(p) for p in presets]
     return {
         "success": True,
-        "data": presets,
+        "data": presets_data,
         "message": "Parameter presets retrieved successfully"
     }
 
@@ -32,7 +108,7 @@ async def get_parameter_preset(preset_id: str, db: Session = Depends(get_db)):
     
     return {
         "success": True,
-        "data": preset,
+        "data": _preset_to_dict(preset),
         "message": "Parameter preset retrieved successfully"
     }
 
@@ -61,7 +137,7 @@ async def create_parameter_preset(preset: ParameterPresetCreate, db: Session = D
     
     return {
         "success": True,
-        "data": db_preset,
+        "data": _preset_to_dict(db_preset),
         "message": "Parameter preset created successfully"
     }
 
@@ -101,7 +177,7 @@ async def update_parameter_preset(
     
     return {
         "success": True,
-        "data": db_preset,
+        "data": _preset_to_dict(db_preset),
         "message": "Parameter preset updated successfully"
     }
 
@@ -191,6 +267,6 @@ async def get_default_parameter_preset(db: Session = Depends(get_db)):
     
     return {
         "success": True,
-        "data": preset,
+        "data": _preset_to_dict(preset),
         "message": "Default parameter preset retrieved successfully"
     }

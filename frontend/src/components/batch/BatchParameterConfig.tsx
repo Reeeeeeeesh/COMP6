@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ParameterPresets } from './ParameterPresets';
 import { getDefaultParameterPreset } from '../../services/parameterPresetService';
+import CategoryParameterConfig from './CategoryParameterConfig';
+import { API_BASE_URL } from '../../config';
+import { getTeams, getConfigs, previewBand, Team, RevenueBandConfig, BandPreview } from '../../services/revenueBandingService';
 
 export interface BatchParameters {
   targetBonusPct: number;
@@ -17,17 +20,45 @@ export interface BatchParameters {
   baseSalaryCapMultiplier?: number;
   totalBonusPool?: number; // Optional total bonus pool amount
   useBonusPoolLimit?: boolean; // Whether to apply bonus pool limit
+  // Revenue banding
+  useRevenueBanding?: boolean;
+  teamId?: string;
+  bandConfigId?: string;
+}
+
+export interface CategoryParameters {
+  targetBonusPct?: number;
+  investmentWeight?: number;
+  qualitativeWeight?: number;
+  investmentScoreMultiplier?: number;
+  qualScoreMultiplier?: number;
+  raf?: number;
+  rafSensitivity?: number;
+  rafLowerClamp?: number;
+  rafUpperClamp?: number;
+  mrtCapPct?: number;
+  useDirectRaf?: boolean;
+  baseSalaryCapMultiplier?: number;
+  // Note: Bonus pool parameters are global only, not category-specific
+}
+
+export interface CategoryBasedBatchParameters {
+  useCategoryBased: boolean;
+  defaultParameters: BatchParameters;
+  departmentOverrides?: { [department: string]: CategoryParameters };
+  salaryRangeOverrides?: { [range: string]: CategoryParameters };
+  positionOverrides?: { [position: string]: CategoryParameters };
 }
 
 interface BatchParameterConfigProps {
-  // Original props
-  onSubmit?: (parameters: BatchParameters) => void;
-  initialValues?: BatchParameters;
+  // Original props - updated to support both parameter types
+  onSubmit?: (parameters: BatchParameters | CategoryBasedBatchParameters) => void;
+  initialValues?: BatchParameters | CategoryBasedBatchParameters;
   onCancel?: () => void;
   
   // New props being passed from BatchUploadContainer
   uploadId?: string;
-  onParametersChange?: (parameters: BatchParameters) => void;
+  onParametersChange?: (parameters: BatchParameters | CategoryBasedBatchParameters) => void;
 }
 
 const defaultParameters: BatchParameters = {
@@ -44,7 +75,10 @@ const defaultParameters: BatchParameters = {
   useDirectRaf: true, // Use RAF from CSV if available
   baseSalaryCapMultiplier: 3.0, // 3x base salary cap
   totalBonusPool: 1000000, // Default £1,000,000 bonus pool
-  useBonusPoolLimit: false // Disabled by default
+  useBonusPoolLimit: false, // Disabled by default
+  useRevenueBanding: false,
+  teamId: undefined,
+  bandConfigId: undefined
 };
 
 export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({ 
@@ -54,132 +88,241 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
   uploadId: _uploadId,
   onParametersChange
 }) => {
-  const [parameters, setParameters] = useState<BatchParameters>(
-    initialValues || defaultParameters
+  // Determine if initial values are category-based or universal
+  const isInitialCategoryBased = initialValues && 'useCategoryBased' in initialValues;
+  
+  const [useCategoryBased, setUseCategoryBased] = useState<boolean>(
+    isInitialCategoryBased || false
+  );
+  
+  const [universalParameters, setUniversalParameters] = useState<BatchParameters>(
+    isInitialCategoryBased ? (initialValues as CategoryBasedBatchParameters).defaultParameters : (initialValues as BatchParameters) || defaultParameters
+  );
+  
+  const [categoryBasedParameters, setCategoryBasedParameters] = useState<CategoryBasedBatchParameters>(
+    isInitialCategoryBased ? (initialValues as CategoryBasedBatchParameters) : {
+      useCategoryBased: false,
+      defaultParameters: universalParameters,
+      departmentOverrides: {},
+      salaryRangeOverrides: {},
+      positionOverrides: {}
+    }
   );
   
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [availableCategories, setAvailableCategories] = useState<{departments: string[], positions: string[]}>({
+    departments: [],
+    positions: []
+  });
+
+  // Revenue banding state (lists + preview)
+  const [teams, setTeams] = useState<Team[]>([])
+  const [bandConfigs, setBandConfigs] = useState<RevenueBandConfig[]>([])
+  const [bandPreview, setBandPreview] = useState<BandPreview | null>(null)
+  const [bandLoading, setBandLoading] = useState<boolean>(false)
+  const [bandError, setBandError] = useState<string | null>(null)
+
+  // Computed property for current parameters to maintain compatibility
+  const parameters = useCategoryBased ? categoryBasedParameters.defaultParameters : universalParameters;
   
   // Load default parameters or use initialValues if provided
   const loadDefaultParameters = useCallback(async () => {
     if (initialValues) {
-      setParameters(initialValues);
+      // Initial values are already handled in state initialization
       return;
     }
     
     try {
       const defaultPreset = await getDefaultParameterPreset();
-      setParameters(defaultPreset.parameters);
+      setUniversalParameters(defaultPreset.parameters);
+      setCategoryBasedParameters(prev => ({
+        ...prev,
+        defaultParameters: defaultPreset.parameters
+      }));
     } catch (error) {
       console.error('Failed to load default parameters:', error);
       // Keep the default parameters defined in state initialization
     }
   }, [initialValues]);
+
+  // Load available categories from uploaded data
+  const loadAvailableCategories = useCallback(async () => {
+    if (!_uploadId) return;
+    
+    try {
+      // Fetch employee data to extract unique departments and positions
+      const response = await fetch(`${API_BASE_URL}/api/v1/batch/uploads/${_uploadId}/columns`);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data.sample_data) {
+          const sampleData = result.data.sample_data;
+          
+          // Extract unique departments and positions
+          const departments = [...new Set(
+            sampleData
+              .map((row: any) => row.department)
+              .filter((dept: any) => dept && typeof dept === 'string')
+          )] as string[];
+          departments.sort();
+          
+          const positions = [...new Set(
+            sampleData
+              .map((row: any) => row.position)
+              .filter((pos: any) => pos && typeof pos === 'string')
+          )] as string[];
+          positions.sort();
+          
+          setAvailableCategories({ departments, positions });
+          console.log('Available categories loaded:', { departments, positions });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load available categories:', error);
+    }
+  }, [_uploadId]);
   
   // Initialize parameters on component mount
   useEffect(() => {
     loadDefaultParameters();
-  }, [loadDefaultParameters]);
+    loadAvailableCategories();
+  }, [loadDefaultParameters, loadAvailableCategories]);
   
   // Validate parameters when they change
   useEffect(() => {
     const newErrors: Record<string, string> = {};
+    const currentParams = useCategoryBased ? categoryBasedParameters.defaultParameters : universalParameters;
     
     // Validate target bonus percentage is between 0 and 1
-    if (parameters.targetBonusPct < 0 || parameters.targetBonusPct > 1) {
+    if (currentParams.targetBonusPct < 0 || currentParams.targetBonusPct > 1) {
       newErrors.targetBonusPct = 'Target bonus percentage must be between 0% and 100%';
     }
     
     // Validate weights sum to 1.0 (100%)
-    const weightSum = parameters.investmentWeight + parameters.qualitativeWeight;
+    const weightSum = currentParams.investmentWeight + currentParams.qualitativeWeight;
     if (Math.abs(weightSum - 1.0) > 0.001) {
       newErrors.weights = `Investment and qualitative weights must sum to 100%. Current sum: ${(weightSum * 100).toFixed(1)}%`;
     }
     
     // Validate individual weights are between 0 and 1
-    if (parameters.investmentWeight < 0 || parameters.investmentWeight > 1) {
+    if (currentParams.investmentWeight < 0 || currentParams.investmentWeight > 1) {
       newErrors.investmentWeight = 'Investment weight must be between 0% and 100%';
     }
     
-    if (parameters.qualitativeWeight < 0 || parameters.qualitativeWeight > 1) {
+    if (currentParams.qualitativeWeight < 0 || currentParams.qualitativeWeight > 1) {
       newErrors.qualitativeWeight = 'Qualitative weight must be between 0% and 100%';
     }
     
     // Validate multipliers are positive
-    if (parameters.investmentScoreMultiplier <= 0) {
+    if (currentParams.investmentScoreMultiplier <= 0) {
       newErrors.investmentScoreMultiplier = 'Investment score multiplier must be positive';
     }
     
-    if (parameters.qualScoreMultiplier <= 0) {
+    if (currentParams.qualScoreMultiplier <= 0) {
       newErrors.qualScoreMultiplier = 'Qualitative score multiplier must be positive';
     }
     
     // Validate RAF is non-negative
-    if (parameters.raf < 0) {
+    if (currentParams.raf < 0) {
       newErrors.raf = 'RAF must be non-negative';
     }
     
     // Validate RAF sensitivity is within reasonable bounds
-    if (parameters.rafSensitivity !== undefined && (parameters.rafSensitivity < 0 || parameters.rafSensitivity > 1)) {
+    if (currentParams.rafSensitivity !== undefined && (currentParams.rafSensitivity < 0 || currentParams.rafSensitivity > 1)) {
       newErrors.rafSensitivity = 'RAF sensitivity must be between 0 and 1';
     }
     
     // Validate bonus pool amount if limit is enabled
-    if (parameters.useBonusPoolLimit && (parameters.totalBonusPool === undefined || parameters.totalBonusPool <= 0)) {
+    if (currentParams.useBonusPoolLimit && (currentParams.totalBonusPool === undefined || currentParams.totalBonusPool <= 0)) {
       newErrors.totalBonusPool = 'Bonus pool amount must be positive when limit is enabled';
     }
     
     // Validate RAF bounds
-    if (parameters.rafLowerClamp !== undefined && parameters.rafUpperClamp !== undefined && 
-        parameters.rafLowerClamp > parameters.rafUpperClamp) {
+    if (currentParams.rafLowerClamp !== undefined && currentParams.rafUpperClamp !== undefined && 
+        currentParams.rafLowerClamp > currentParams.rafUpperClamp) {
       newErrors.rafBounds = 'RAF lower clamp must be less than or equal to upper clamp';
     }
     
     // Validate MRT cap percentage is reasonable
-    if (parameters.mrtCapPct < 0) {
+    if (currentParams.mrtCapPct < 0) {
       newErrors.mrtCapPct = 'MRT cap percentage cannot be negative';
-    } else if (parameters.mrtCapPct > 5) {
+    } else if (currentParams.mrtCapPct > 5) {
       newErrors.mrtCapPct = 'MRT cap percentage exceeds recommended maximum (5.0)';
     }
     
     // Validate base salary cap multiplier
-    if (parameters.baseSalaryCapMultiplier !== undefined) {
-      if (parameters.baseSalaryCapMultiplier <= 0) {
+    if (currentParams.baseSalaryCapMultiplier !== undefined) {
+      if (currentParams.baseSalaryCapMultiplier <= 0) {
         newErrors.baseSalaryCapMultiplier = 'Base salary cap multiplier must be positive';
-      } else if (parameters.baseSalaryCapMultiplier < 1) {
+      } else if (currentParams.baseSalaryCapMultiplier < 1) {
         newErrors.baseSalaryCapMultiplier = 'Base salary cap multiplier must be at least 1';
-      } else if (parameters.baseSalaryCapMultiplier > 10) {
+      } else if (currentParams.baseSalaryCapMultiplier > 10) {
         newErrors.baseSalaryCapMultiplier = 'Base salary cap multiplier exceeds recommended maximum (10.0)';
+      }
+    }
+
+    // Revenue banding validation
+    if (currentParams.useRevenueBanding) {
+      if (!currentParams.teamId) {
+        newErrors.teamId = 'Team is required when revenue banding is enabled';
       }
     }
     
     setErrors(newErrors);
-  }, [parameters]);
+  }, [useCategoryBased, universalParameters, categoryBasedParameters]);
   
   const handleChange = (field: keyof BatchParameters, value: number | boolean) => {
-    setParameters(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    
-    // If changing one weight, automatically adjust the other to maintain sum of 100%
-    if (field === 'investmentWeight' && typeof value === 'number') {
-      setParameters(prev => ({
+    if (useCategoryBased) {
+      setCategoryBasedParameters(prev => ({
         ...prev,
-        investmentWeight: value,
-        qualitativeWeight: Math.max(0, Math.min(1, 1 - value))
-      }));
-    } else if (field === 'qualitativeWeight' && typeof value === 'number') {
-      setParameters(prev => ({
-        ...prev,
-        qualitativeWeight: value,
-        investmentWeight: Math.max(0, Math.min(1, 1 - value))
+        defaultParameters: {
+          ...prev.defaultParameters,
+          [field]: value
+        }
       }));
     } else {
-      setParameters(prev => ({
+      setUniversalParameters(prev => ({
         ...prev,
         [field]: value
       }));
+    }
+    
+    // If changing one weight, automatically adjust the other to maintain sum of 100%
+    if (field === 'investmentWeight' && typeof value === 'number') {
+      const adjustedQualWeight = Math.max(0, Math.min(1, 1 - value));
+      if (useCategoryBased) {
+        setCategoryBasedParameters(prev => ({
+          ...prev,
+          defaultParameters: {
+            ...prev.defaultParameters,
+            investmentWeight: value,
+            qualitativeWeight: adjustedQualWeight
+          }
+        }));
+      } else {
+        setUniversalParameters(prev => ({
+          ...prev,
+          investmentWeight: value,
+          qualitativeWeight: adjustedQualWeight
+        }));
+      }
+    } else if (field === 'qualitativeWeight' && typeof value === 'number') {
+      const adjustedInvestWeight = Math.max(0, Math.min(1, 1 - value));
+      if (useCategoryBased) {
+        setCategoryBasedParameters(prev => ({
+          ...prev,
+          defaultParameters: {
+            ...prev.defaultParameters,
+            qualitativeWeight: value,
+            investmentWeight: adjustedInvestWeight
+          }
+        }));
+      } else {
+        setUniversalParameters(prev => ({
+          ...prev,
+          qualitativeWeight: value,
+          investmentWeight: adjustedInvestWeight
+        }));
+      }
     }
   };
   
@@ -187,21 +330,106 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
     e.preventDefault();
     
     if (Object.keys(errors).length === 0) {
+      const currentParams = useCategoryBased ? categoryBasedParameters : universalParameters;
+      
       // Use either onSubmit or onParametersChange, whichever is provided
       if (onSubmit) {
-        onSubmit(parameters);
+        onSubmit(currentParams);
       } else if (onParametersChange) {
-        onParametersChange(parameters);
+        onParametersChange(currentParams);
       }
       
-      console.log('Parameters applied:', parameters);
+      console.log('Parameters applied:', currentParams);
     }
   };
+
+  // Helper to update any parameter (number | boolean | string)
+  const setParamValue = (key: keyof BatchParameters, value: any) => {
+    if (useCategoryBased) {
+      setCategoryBasedParameters(prev => ({
+        ...prev,
+        defaultParameters: {
+          ...prev.defaultParameters,
+          [key]: value,
+        },
+      }))
+    } else {
+      setUniversalParameters(prev => ({
+        ...prev,
+        [key]: value as any,
+      }))
+    }
+  }
+
+  // Fetch teams/configs when banding is enabled
+  useEffect(() => {
+    const currentParams = useCategoryBased ? categoryBasedParameters.defaultParameters : universalParameters;
+    if (currentParams.useRevenueBanding) {
+      (async () => {
+        try {
+          const [ts, cs] = await Promise.all([getTeams(), getConfigs()])
+          setTeams(ts)
+          setBandConfigs(cs)
+        } catch (err) {
+          console.error('Failed to load banding lists', err)
+        }
+      })()
+    }
+  }, [useCategoryBased, universalParameters.useRevenueBanding, categoryBasedParameters.defaultParameters.useRevenueBanding])
+
+  // Auto-preview when enabled and teamId selected
+  useEffect(() => {
+    const currentParams = useCategoryBased ? categoryBasedParameters.defaultParameters : universalParameters;
+    if (currentParams.useRevenueBanding && currentParams.teamId) {
+      setBandLoading(true)
+      setBandError(null)
+      setBandPreview(null)
+      previewBand(currentParams.teamId, currentParams.bandConfigId)
+        .then((res) => setBandPreview(res))
+        .catch((err) => setBandError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setBandLoading(false))
+    } else {
+      setBandPreview(null)
+    }
+  }, [useCategoryBased, universalParameters.useRevenueBanding, universalParameters.teamId, universalParameters.bandConfigId, categoryBasedParameters.defaultParameters.useRevenueBanding, categoryBasedParameters.defaultParameters.teamId, categoryBasedParameters.defaultParameters.bandConfigId])
   
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-xl font-semibold mb-2">Configure Calculation Parameters</h2>
-      <p className="text-gray-700 mb-6">Adjust the parameters below to customize how bonuses are calculated for all employees.</p>
+      <p className="text-gray-700 mb-4">Adjust the parameters below to customize how bonuses are calculated.</p>
+      
+      {/* Parameter Mode Toggle */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <h3 className="text-lg font-medium text-blue-900 mb-3">Parameter Configuration Mode</h3>
+        <div className="flex items-center space-x-6">
+          <label className="flex items-center">
+            <input
+              type="radio"
+              checked={!useCategoryBased}
+              onChange={() => {
+                setUseCategoryBased(false);
+                console.log('Switched to Universal Parameters mode');
+              }}
+              className="mr-2 text-blue-600"
+            />
+            <span className="text-sm font-medium text-gray-900">Universal Parameters</span>
+            <span className="ml-2 text-xs text-gray-600">(Same parameters for all employees)</span>
+          </label>
+          <label className="flex items-center">
+            <input
+              type="radio"
+              checked={useCategoryBased}
+              onChange={() => {
+                setUseCategoryBased(true);
+                console.log('Switched to Category-Based Parameters mode');
+              }}
+              className="mr-2 text-blue-600"
+            />
+            <span className="text-sm font-medium text-gray-900">Category-Based Parameters</span>
+            <span className="ml-2 text-xs text-gray-600">(Different parameters by department/salary/position)</span>
+          </label>
+        </div>
+      </div>
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Error summary */}
@@ -227,6 +455,19 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
           </div>
         )}
         
+        {/* Conditional Parameter Forms */}
+        {useCategoryBased ? (
+          /* Category-Based Parameter Configuration */
+          <div>
+            <CategoryParameterConfig
+              parameters={categoryBasedParameters}
+              onParametersChange={setCategoryBasedParameters}
+              availableCategories={availableCategories}
+            />
+          </div>
+        ) : (
+          /* Universal Parameter Configuration */
+          <div>
         {/* TARGET BONUS SECTION */}
         <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
           <h3 className="text-lg font-semibold mb-3 text-blue-700">Target Bonus Percentage</h3>
@@ -972,7 +1213,83 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
             <p className="text-red-500 text-sm mt-1 font-medium">{errors.totalBonusPool}</p>
           )}
         </div>
+
+        {/* REVENUE BANDING SECTION */}
+        <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
+          <h3 className="text-lg font-semibold mb-3 text-blue-700">Revenue Banding (Team Multiplier)</h3>
+
+          <div className="bg-white p-4 rounded-md border border-gray-300 mb-4">
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="useRevenueBanding"
+                checked={!!parameters.useRevenueBanding}
+                onChange={(e) => setParamValue('useRevenueBanding', e.target.checked)}
+                className="mr-3 h-5 w-5 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <div>
+                <label htmlFor="useRevenueBanding" className="text-md font-semibold text-gray-800 block">
+                  Use revenue banding to adjust team bonus pool
+                </label>
+                <p className="text-sm text-gray-600 mt-1">
+                  Applies a band-based multiplier derived from 3-year revenue momentum, consistency, and optional peer context.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {parameters.useRevenueBanding && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-white p-4 rounded-md border border-gray-300">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Team</label>
+                <select
+                  className={`w-full border rounded p-2 ${errors.teamId ? 'border-red-300 text-red-600' : 'border-gray-300'}`}
+                  value={parameters.teamId || ''}
+                  onChange={(e) => setParamValue('teamId', e.target.value || undefined)}
+                >
+                  <option value="">Select a team</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                {errors.teamId && <p className="text-red-500 text-sm mt-1 font-medium">{errors.teamId}</p>}
+              </div>
+
+              <div className="bg-white p-4 rounded-md border border-gray-300">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Banding Config (optional)</label>
+                <select
+                  className="w-full border rounded p-2 border-gray-300"
+                  value={parameters.bandConfigId || ''}
+                  onChange={(e) => setParamValue('bandConfigId', e.target.value || undefined)}
+                >
+                  <option value="">Default configuration</option>
+                  {bandConfigs.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-white p-4 rounded-md border border-gray-300">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Preview</label>
+                {bandLoading && <p className="text-sm text-gray-600">Loading preview...</p>}
+                {bandError && <p className="text-sm text-red-600">{bandError}</p>}
+                {!bandLoading && !bandError && bandPreview && (
+                  <div className="text-sm text-gray-800">
+                    <p><span className="font-medium">Band:</span> {bandPreview.band}</p>
+                    <p><span className="font-medium">Multiplier:</span> {bandPreview.multiplier.toFixed(2)}×</p>
+                    <p><span className="font-medium">Composite:</span> {bandPreview.composite_score.toFixed(1)}</p>
+                  </div>
+                )}
+                {!bandLoading && !bandError && !bandPreview && (
+                  <p className="text-sm text-gray-500">Select a team to see preview.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
+          </div>
+        )}
       
       <div className="flex justify-end mt-6 space-x-4">
         {onCancel && (
@@ -999,13 +1316,20 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
       {/* Parameter Presets */}
       <ParameterPresets
         onSelectPreset={(presetParams) => {
-          setParameters(presetParams);
+          if (useCategoryBased) {
+            setCategoryBasedParameters(prev => ({
+              ...prev,
+              defaultParameters: presetParams
+            }));
+          } else {
+            setUniversalParameters(presetParams);
+          }
         }}
         onSavePreset={(preset) => {
           // In a real implementation, this would save to the backend
           console.log('Saving preset:', preset);
         }}
-        currentParameters={parameters}
+        currentParameters={useCategoryBased ? categoryBasedParameters.defaultParameters : universalParameters}
       />
     </form>
   </div>

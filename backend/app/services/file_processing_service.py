@@ -306,24 +306,37 @@ class FileProcessingService:
             # Normalize field names
             csv_reader.fieldnames = [name.strip().lower().replace(' ', '_') for name in csv_reader.fieldnames]
             
-            # Process rows
+            # Process rows in batches for better performance
             processed_count = 0
             failed_count = 0
+            batch_size = 50  # Process in smaller batches
+            employee_records = []
+            
+            logger.info(f"Starting to process {validation_result.total_rows} rows for upload {upload_id}")
             
             for row_number, row in enumerate(csv_reader, 1):
                 try:
-                    # Create employee data record
-                    employee_data = self._create_employee_record(upload_id, row_number, row)
+                    # Create employee data record (without committing)
+                    employee_data = self._create_employee_record_batch(upload_id, row_number, row)
+                    employee_records.append(employee_data)
                     processed_count += 1
                     
-                    # Update progress every 100 rows
-                    if processed_count % 100 == 0:
+                    # Batch insert and update progress every batch_size rows
+                    if len(employee_records) >= batch_size or row_number == validation_result.total_rows:
+                        # Batch insert records
+                        self.db.add_all(employee_records)
+                        self.db.commit()
+                        logger.info(f"Committed batch of {len(employee_records)} records")
+                        employee_records = []  # Clear batch
+                        
+                        # Update progress
                         self.batch_upload_dal.update_progress(
                             upload_id, 
                             validation_result.total_rows, 
                             processed_count, 
                             failed_count
                         )
+                        logger.info(f"Progress: {processed_count}/{validation_result.total_rows} rows processed")
                         
                 except Exception as e:
                     logger.warning(f"Failed to process row {row_number} in upload {upload_id}: {str(e)}")
@@ -335,6 +348,12 @@ class FileProcessingService:
                         self.batch_upload_dal.mark_as_failed(upload_id, error_message)
                         return False, error_message
             
+            # Commit any remaining records
+            if employee_records:
+                self.db.add_all(employee_records)
+                self.db.commit()
+                logger.info(f"Committed final batch of {len(employee_records)} records")
+            
             # Final progress update
             self.batch_upload_dal.update_progress(
                 upload_id, 
@@ -345,6 +364,7 @@ class FileProcessingService:
             
             # Mark as completed
             self.batch_upload_dal.mark_as_completed(upload_id)
+            logger.info(f"File processing completed for upload {upload_id}: {processed_count} processed, {failed_count} failed")
             
             success_message = f"Successfully processed {processed_count} rows"
             if failed_count > 0:
@@ -450,6 +470,81 @@ class FileProcessingService:
         self.db.add(employee)
         self.db.commit()
         self.db.refresh(employee)
+        
+        return employee
+    
+    def _create_employee_record_batch(self, upload_id: str, row_number: int, row_data: Dict[str, str]) -> EmployeeData:
+        """
+        Create an EmployeeData record from CSV row data (for batch processing - no individual commit).
+        
+        Args:
+            upload_id: ID of the batch upload
+            row_number: Row number in the CSV file
+            row_data: Dictionary of column values
+            
+        Returns:
+            Created EmployeeData instance (not yet committed)
+        """
+        # Extract standard fields
+        employee_data = {
+            'batch_upload_id': upload_id,
+            'row_number': row_number,
+            'employee_id': row_data.get('employee_id', '').strip(),
+            'first_name': row_data.get('first_name', '').strip() or None,
+            'last_name': row_data.get('last_name', '').strip() or None,
+            'email': row_data.get('email', '').strip() or None,
+            'department': row_data.get('department', '').strip() or None,
+            'position': row_data.get('position', '').strip() or None,
+        }
+        
+        # Handle salary
+        try:
+            salary_str = row_data.get('base_salary', '').strip().replace(',', '').replace('$', '')
+            employee_data['salary'] = float(salary_str) if salary_str else None
+        except ValueError:
+            employee_data['salary'] = None
+        
+        # Handle hire date
+        hire_date_str = row_data.get('hire_date', '').strip()
+        if hire_date_str:
+            try:
+                import pandas as pd
+                employee_data['hire_date'] = pd.to_datetime(hire_date_str).to_pydatetime()
+            except:
+                employee_data['hire_date'] = None
+        else:
+            employee_data['hire_date'] = None
+        
+        # Store additional data as JSON
+        additional_data = {}
+        for key, value in row_data.items():
+            if key not in {'employee_id', 'first_name', 'last_name', 'email', 
+                          'department', 'position', 'base_salary', 'hire_date'}:
+                if value and value.strip():
+                    additional_data[key] = value.strip()
+        
+        employee_data['additional_data'] = additional_data if additional_data else None
+        
+        # Simplified validation for batch processing
+        validation_data = {
+            'base_salary': employee_data['salary'],
+            'employee_id': employee_data['employee_id']
+        }
+        
+        # Basic validation - employee_id and salary are required
+        is_valid = bool(employee_data['employee_id'] and employee_data['salary'] and employee_data['salary'] > 0)
+        validation_errors = []
+        
+        if not employee_data['employee_id']:
+            validation_errors.append("Missing employee_id")
+        if not employee_data['salary'] or employee_data['salary'] <= 0:
+            validation_errors.append("Missing or invalid base_salary")
+        
+        employee_data['is_valid'] = is_valid
+        employee_data['validation_errors'] = validation_errors if validation_errors else None
+        
+        # Create database record (but don't commit yet)
+        employee = EmployeeData(**employee_data)
         
         return employee
     

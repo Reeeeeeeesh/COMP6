@@ -6,7 +6,7 @@ It handles the calculation of bonuses for all employees in a batch upload,
 applying global parameters and storing results in the database.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
 from sqlalchemy.orm import Session
 import logging
@@ -15,6 +15,7 @@ import asyncio
 from ..models import BatchUpload, EmployeeData, BatchCalculationResult, EmployeeCalculationResult, BatchScenario
 from ..schemas import BatchParameters, BatchCalculationResultCreate, EmployeeCalculationResultCreate
 from ..calculation_engine import CalculationEngine, CalculationInputs, CalculationResult, ValidationError
+from .revenue_banding_service import RevenueBandingService
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class BatchCalculationService:
     async def calculate_batch(
         self, 
         batch_upload_id: str, 
-        parameters: BatchParameters = None,
+        parameters: Union[BatchParameters, Dict[str, Any]] = None,
         create_scenario: bool = False,
         scenario_name: str = None
     ) -> Tuple[BatchCalculationResult, List[EmployeeCalculationResult]]:
@@ -43,7 +44,8 @@ class BatchCalculationService:
         
         Args:
             batch_upload_id: ID of the batch upload
-            parameters: Global calculation parameters (optional, will use parameters from batch upload if not provided)
+            parameters: Calculation parameters - either BatchParameters (legacy) or CategoryBasedBatchParameters dict (new) 
+                       (optional, will use parameters from batch upload if not provided)
             create_scenario: Whether to create a scenario for this calculation
             scenario_name: Name of the scenario (required if create_scenario is True)
             
@@ -71,7 +73,32 @@ class BatchCalculationService:
                     raise ValueError("No calculation parameters provided and none found in batch upload")
                 parameters = BatchParameters(**batch_upload.calculation_parameters)
             
-            logger.info(f"Using parameters: {parameters.dict()}")
+            # Determine if we're using category-based parameters or legacy parameters
+            is_category_based = isinstance(parameters, dict) and parameters.get('useCategoryBased', False)
+            
+            if is_category_based:
+                logger.info("Using category-based parameters")
+                logger.info(f"Category parameters: {parameters}")
+                # Store the raw category-based parameters for later use
+                category_based_params = parameters
+                # Extract default parameters for legacy compatibility in some places
+                legacy_parameters = BatchParameters(**parameters['defaultParameters'])
+            else:
+                logger.info("Using legacy universal parameters")
+                # Convert BatchParameters to dict format for compatibility
+                if isinstance(parameters, BatchParameters):
+                    legacy_parameters = parameters
+                    logger.info(f"Using parameters: {parameters.dict()}")
+                else:
+                    # It's a dict but not category-based, convert to BatchParameters
+                    legacy_parameters = BatchParameters(**parameters)
+                    logger.info(f"Using parameters: {legacy_parameters.dict()}")
+                
+                # Create category-based structure for universal application
+                category_based_params = {
+                    'useCategoryBased': False,
+                    'defaultParameters': legacy_parameters.dict() if hasattr(legacy_parameters, 'dict') else legacy_parameters
+                }
             
             # Update batch upload status
             batch_upload.status = "processing"
@@ -85,10 +112,19 @@ class BatchCalculationService:
                 if not scenario_name:
                     scenario_name = f"Batch {batch_upload_id[:8]} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
                 
+                # Persist parameters safely regardless of input type
+                params_for_persistence: Dict[str, Any]
+                if is_category_based:
+                    params_for_persistence = category_based_params  # already a dict
+                else:
+                    params_for_persistence = (
+                        legacy_parameters.dict() if hasattr(legacy_parameters, 'dict') else legacy_parameters  # type: ignore
+                    )
+
                 scenario = BatchScenario(
                     session_id=batch_upload.session_id,
                     name=scenario_name,
-                    parameters=parameters.dict()
+                    parameters=params_for_persistence
                 )
                 self.db.add(scenario)
                 self.db.commit()
@@ -96,20 +132,29 @@ class BatchCalculationService:
                 logger.info(f"Created scenario: {scenario_name}")
             
             # Get all employee data for this batch
+            logger.info(f"=== QUERYING EMPLOYEE DATA for batch {batch_upload_id} ===")
             employee_data = self.db.query(EmployeeData).filter(
                 EmployeeData.batch_upload_id == batch_upload_id,
                 EmployeeData.is_valid == True
             ).all()
             
+            logger.info(f"Query returned {len(employee_data)} employees")
+            
             if not employee_data:
-                logger.error(f"No valid employee data found for batch upload {batch_upload_id}")
+                logger.error(f"=== NO VALID EMPLOYEE DATA FOUND for batch upload {batch_upload_id} ===")
                 raise ValueError(f"No valid employee data found for batch upload {batch_upload_id}")
                 
-            logger.info(f"Found {len(employee_data)} valid employees to process")
+            logger.info(f"=== FOUND {len(employee_data)} VALID EMPLOYEES TO PROCESS ===")
             
             # Check if bonus pool limit is enabled
-            use_bonus_pool_limit = parameters.dict().get('useBonusPoolLimit', False)
-            total_bonus_pool = parameters.dict().get('totalBonusPool')
+            if is_category_based:
+                # For category-based parameters, bonus pool is in the default parameters
+                use_bonus_pool_limit = category_based_params['defaultParameters'].get('useBonusPoolLimit', False)
+                total_bonus_pool = category_based_params['defaultParameters'].get('totalBonusPool')
+            else:
+                # For legacy parameters
+                use_bonus_pool_limit = legacy_parameters.dict().get('useBonusPoolLimit', False)
+                total_bonus_pool = legacy_parameters.dict().get('totalBonusPool')
             
             # If bonus pool limit is enabled but no pool amount is set, disable it
             if use_bonus_pool_limit and (total_bonus_pool is None or total_bonus_pool <= 0):
@@ -118,19 +163,62 @@ class BatchCalculationService:
                 total_bonus_pool = None
             
             # Create batch calculation result
+            # Use the same safe-serialized parameters for the batch result
+            result_params_for_persistence: Dict[str, Any]
+            if is_category_based:
+                result_params_for_persistence = category_based_params
+            else:
+                result_params_for_persistence = (
+                    legacy_parameters.dict() if hasattr(legacy_parameters, 'dict') else legacy_parameters  # type: ignore
+                )
+
             batch_result = BatchCalculationResult(
                 batch_upload_id=batch_upload_id,
                 scenario_id=scenario_id,
                 total_employees=len(employee_data),
                 total_base_salary=0,
                 total_bonus_amount=0,
+                total_bonus_pool=0.0,
                 average_bonus_percentage=0,
-                calculation_parameters=parameters.dict()
+                calculation_parameters=result_params_for_persistence
             )
             self.db.add(batch_result)
             self.db.commit()
             logger.info(f"Created batch calculation result with ID: {batch_result.id}")
             
+            # Optionally compute revenue band multiplier once per batch (if enabled)
+            team_multiplier: float = 1.0
+            band_snapshot: Dict[str, Any] = {}
+            if (is_category_based and category_based_params.get('defaultParameters', {}).get('useRevenueBanding')) or (
+                not is_category_based and getattr(legacy_parameters, 'useRevenueBanding', False)
+            ):
+                try:
+                    # Determine team/config IDs from parameters
+                    if is_category_based:
+                        default_params = category_based_params.get('defaultParameters', {})
+                        team_id = default_params.get('teamId')
+                        config_id = default_params.get('bandConfigId')
+                    else:
+                        team_id = getattr(legacy_parameters, 'teamId', None)
+                        config_id = getattr(legacy_parameters, 'bandConfigId', None)
+
+                    if team_id:
+                        band_service = RevenueBandingService(self.db)
+                        band_result = band_service.preview_team_band(team_id=team_id, config_id=config_id)
+                        team_multiplier = float(band_result.multiplier)
+                        band_snapshot = {
+                            'band': band_result.band,
+                            'multiplier': band_result.multiplier,
+                            'composite_score': band_result.composite_score,
+                            'team_id': band_result.team_id,
+                            'config_id': band_result.config_id,
+                        }
+                        logger.info(f"Applying revenue band multiplier {team_multiplier} (band {band_result.band})")
+                except Exception as e:
+                    logger.error(f"Failed to compute revenue banding multiplier: {str(e)}. Proceeding without banding.")
+                    team_multiplier = 1.0
+                    band_snapshot = {}
+
             # Process employees in chunks to avoid memory issues
             chunk_size = 100
             total_base_salary = 0
@@ -173,19 +261,32 @@ class BatchCalculationService:
                         is_mrt = bool(raw_is_mrt)
                     
                     # Prepare calculation inputs for first pass (without pool limit)
-                    calculation_inputs = CalculationInputs(
-                        base_salary=base_salary,
-                        target_bonus_pct=parameters.targetBonusPct,
-                        investment_weight=parameters.investmentWeight,
-                        investment_score_multiplier=parameters.investmentScoreMultiplier,
-                        qualitative_weight=parameters.qualitativeWeight,
-                        qual_score_multiplier=parameters.qualScoreMultiplier,
-                        raf=raf_override if raf_override is not None and parameters.useDirectRaf else parameters.raf,
-                        is_mrt=is_mrt,
-                        mrt_cap_pct=parameters.mrtCapPct if is_mrt else None,
-                        # No bonus pool limit for first pass
-                        use_bonus_pool_limit=False
-                    )
+                    if is_category_based:
+                        # Use category-aware parameter resolution
+                        calculation_inputs = self.calculation_engine.create_calculation_inputs_from_category_params(
+                            category_based_params=category_based_params,
+                            base_salary=base_salary,
+                            employee_department=employee.department,
+                            employee_position=employee.position,
+                            is_mrt=is_mrt,
+                            raf_override=raf_override if raf_override is not None and category_based_params['defaultParameters'].get('useDirectRaf', True) else None,
+                            use_bonus_pool_limit=False  # First pass without pool limit
+                        )
+                    else:
+                        # Use legacy universal parameters
+                        calculation_inputs = CalculationInputs(
+                            base_salary=base_salary,
+                            target_bonus_pct=legacy_parameters.targetBonusPct,
+                            investment_weight=legacy_parameters.investmentWeight,
+                            investment_score_multiplier=legacy_parameters.investmentScoreMultiplier,
+                            qualitative_weight=legacy_parameters.qualitativeWeight,
+                            qual_score_multiplier=legacy_parameters.qualScoreMultiplier,
+                            raf=raf_override if raf_override is not None and legacy_parameters.useDirectRaf else legacy_parameters.raf,
+                            is_mrt=is_mrt,
+                            mrt_cap_pct=legacy_parameters.mrtCapPct if is_mrt else None,
+                            # No bonus pool limit for first pass
+                            use_bonus_pool_limit=False
+                        )
                     
                     # Store calculation inputs for potential second pass
                     initial_calculation_inputs.append((employee.id, calculation_inputs))
@@ -246,7 +347,7 @@ class BatchCalculationService:
                     
                     base_salary = float(employee.salary) if employee.salary is not None else 0
                     
-                    # If pool scaling is needed, recalculate with pool limit
+                    # Apply team multiplier after caps and before any pool scaling
                     final_result = initial_result
                     if pool_scaling_applied:
                         # Get the original calculation inputs
@@ -259,6 +360,25 @@ class BatchCalculationService:
                             
                             # Recalculate with pool limit
                             final_result = self.calculation_engine.calculate_final_bonus(calculation_inputs)
+
+                    # Apply team multiplier (banding) on the final capped (and possibly pool-scaled) bonus
+                    if team_multiplier != 1.0:
+                        adjusted_bonus = final_result.final_bonus * team_multiplier
+                        # Rebuild a CalculationResult-like object with adjusted bonus and step note
+                        final_result = CalculationResult(
+                            target_bonus=final_result.target_bonus,
+                            weighted_performance=final_result.weighted_performance,
+                            pre_raf_bonus=final_result.pre_raf_bonus,
+                            initial_bonus=final_result.initial_bonus,
+                            base_salary_cap=final_result.base_salary_cap,
+                            mrt_cap=final_result.mrt_cap,
+                            final_bonus=adjusted_bonus,
+                            cap_applied=final_result.cap_applied,
+                            calculation_steps={**final_result.calculation_steps, 'team_multiplier': team_multiplier},
+                            pool_scaling_applied=final_result.pool_scaling_applied,
+                            pool_scaling_factor=final_result.pool_scaling_factor,
+                            pre_scaling_bonus=final_result.pre_scaling_bonus,
+                        )
                     
                     # Create employee calculation result
                     employee_result = EmployeeCalculationResult(
@@ -284,17 +404,27 @@ class BatchCalculationService:
             average_bonus_pct = total_bonus_amount / total_base_salary if total_base_salary > 0 else 0
             
             batch_result.total_base_salary = total_base_salary
+            # Apply team multiplier to aggregate if it was used and pool scaling was not recomputed
+            if team_multiplier != 1.0:
+                total_bonus_amount = total_bonus_amount * team_multiplier
             batch_result.total_bonus_amount = total_bonus_amount
-            batch_result.average_bonus_percentage = average_bonus_pct
+            batch_result.total_bonus_pool = total_bonus_pool if total_bonus_pool is not None else total_bonus_amount
+            batch_result.average_bonus_percentage = average_bonus_pct * (team_multiplier if team_multiplier != 1.0 else 1.0)
             
             # Add bonus pool information to batch result parameters
-            parameters_dict = parameters.dict()
+            if is_category_based:
+                parameters_dict = category_based_params.copy()
+            else:
+                parameters_dict = legacy_parameters.dict() if hasattr(legacy_parameters, 'dict') else legacy_parameters
+            
             parameters_dict.update({
                 'bonus_pool_limit': total_bonus_pool,
                 'bonus_pool_scaling_applied': pool_scaling_applied,
                 'bonus_pool_scaling_factor': pool_scaling_factor,
                 'pre_scaling_bonus_total': pre_scaling_bonus_total
             })
+            if band_snapshot:
+                parameters_dict.update({'revenue_banding': band_snapshot})
             batch_result.calculation_parameters = parameters_dict
             
             # Update batch upload status

@@ -11,7 +11,7 @@ from .models import Session as SessionModel
 from .schemas import ApiResponse, SessionResponse
 from .services.session_service import SessionService
 from .services.data_retention_service import DataRetentionService
-from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios, dashboard
+from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios, dashboard, revenue_banding
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -87,9 +87,19 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "http://localhost:3002",
+        "http://localhost:3003",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002", 
+        "http://127.0.0.1:3003",
+        "*"  # Fallback for any other origins
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -97,21 +107,20 @@ app.add_middleware(
 app.include_router(batch.router)  # Router already has prefix='/api/v1/batch'
 app.include_router(batch_parameters.router, prefix="/api/v1/batch")
 
-# Fix parameter_presets router - it already has a prefix of '/parameter-presets'
-# Mount it at both /api/v1/parameter-presets and /parameter-presets to ensure compatibility
+# Mount parameter_presets only under /api/v1 to avoid duplicate routes
 app.include_router(parameter_presets.router, prefix="/api/v1")
-app.include_router(parameter_presets.router, prefix="")
 
-# Mount batch_calculations router at multiple prefixes to ensure compatibility
-# The router itself has prefix='/api/batch-calculations'
-app.include_router(batch_calculations.router)  # Original prefix
-app.include_router(batch_calculations.router, prefix="/api/v1")  # Alternative prefix
+# Mount batch_calculations router (now under /api/v1/batch-calculations)
+app.include_router(batch_calculations.router)
 
 # Include scenarios router
 app.include_router(scenarios.router)  # Router already has prefix='/api/v1/scenarios'
 
 # Include dashboard router
 app.include_router(dashboard.router)  # Router already has prefix='/api/v1/dashboard'
+
+# Include revenue banding router (read-only for now)
+app.include_router(revenue_banding.router)
 
 @app.get("/")
 async def root():
