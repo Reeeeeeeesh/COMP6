@@ -13,3 +13,14 @@ pytest-asyncio==0.21.1
 httpx==0.25.2
 pandas==2.1.4
 chardet==5.2.0
+# Platform transformation dependencies
+redis==5.0.1
+celery==5.3.4
+polars==0.20.2
+pyarrow==14.0.2
+prometheus-client==0.19.0
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1
+# Task 20: Individual bonus statement generation
+reportlab==4.0.8
+xlsxwriter==3.1.9

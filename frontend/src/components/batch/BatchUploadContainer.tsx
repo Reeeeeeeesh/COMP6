@@ -4,6 +4,7 @@ import { FileUpload } from './FileUpload';
 import { FilePreview } from './FilePreview';
 import { UploadProgress } from './UploadProgress';
 import { BatchParameterConfig, BatchParameters } from './BatchParameterConfig';
+import ColumnMappingInterface from './ColumnMappingInterface';
 import { triggerBatchCalculation, getBatchCalculationResults, getBatchUploadStatus, updateBatchParameters } from '../../services/batchCalculationService';
 import { Button, CircularProgress, Box, Typography, LinearProgress } from '@mui/material';
 import { CalculateOutlined } from '@mui/icons-material';
@@ -56,12 +57,13 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   onError
 }) => {
   const navigate = useNavigate();
-  const [currentStep, setCurrentStep] = useState<'upload' | 'processing' | 'preview' | 'parameters' | 'calculating'>('upload');
+  const [currentStep, setCurrentStep] = useState<'upload' | 'processing' | 'preview' | 'column-mapping' | 'parameters' | 'calculating'>('upload');
   const [uploadData, setUploadData] = useState<UploadData | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
   const [errors, setErrors] = useState<ErrorItem[]>([]);
   const [parameters, setParameters] = useState<BatchParameters | null>(null);
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [isCalculating, setIsCalculating] = useState(false);
   const [calculationProgress, setCalculationProgress] = useState<number>(0);
 
@@ -626,18 +628,25 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
             <span className="font-medium">Processing</span>
           </div>
           <div className="flex-1 h-px bg-gray-300 mx-4"></div>
-          <div className={`flex items-center ${currentStep === 'parameters' ? 'text-blue-600' : 'text-gray-500'}`}>
+          <div className={`flex items-center ${currentStep === 'preview' ? 'text-blue-600' : 'text-gray-500'}`}>
             <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
               <span className="text-sm font-medium">3</span>
             </div>
-            <span className="font-medium">Configure Parameters</span>
+            <span className="font-medium">Preview & Validate</span>
           </div>
           <div className="flex-1 h-px bg-gray-300 mx-4"></div>
-          <div className={`flex items-center ${currentStep === 'preview' ? 'text-blue-600' : 'text-gray-500'}`}>
+          <div className={`flex items-center ${currentStep === 'column-mapping' ? 'text-blue-600' : 'text-gray-500'}`}>
             <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
               <span className="text-sm font-medium">4</span>
             </div>
-            <span className="font-medium">Preview & Validate</span>
+            <span className="font-medium">Map Columns</span>
+          </div>
+          <div className="flex-1 h-px bg-gray-300 mx-4"></div>
+          <div className={`flex items-center ${currentStep === 'parameters' ? 'text-blue-600' : 'text-gray-500'}`}>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
+              <span className="text-sm font-medium">5</span>
+            </div>
+            <span className="font-medium">Configure Parameters</span>
           </div>
         </div>
       </div>
@@ -691,6 +700,17 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
         />
       )}
 
+      {currentStep === 'column-mapping' && uploadData && (
+        <ColumnMappingInterface
+          columns={uploadData.columns}
+          onMappingComplete={(mapping) => {
+            setColumnMapping(mapping);
+            setCurrentStep('parameters');
+          }}
+          onCancel={handleReset}
+        />
+      )}
+
       {currentStep === 'parameters' && uploadData && (
         <div>
           <BatchParameterConfig 
@@ -717,7 +737,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
           uploadData={uploadData}
           onReset={handleReset}
           onContinue={() => {
-            setCurrentStep('parameters');
+            setCurrentStep('column-mapping');
           }}
         />
       )}

@@ -121,21 +121,21 @@ export const UploadProgress: React.FC<UploadProgressProps> = ({
             <span className="text-sm text-gray-900 truncate max-w-xs">{fileName}</span>
           </div>
           
-          {totalRows !== undefined && (
+          {totalRows !== undefined && totalRows !== null && (
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">Total Rows:</span>
               <span className="text-sm text-gray-900">{totalRows.toLocaleString()}</span>
             </div>
           )}
           
-          {processedRows !== undefined && (
+          {processedRows !== undefined && processedRows !== null && (
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">Processed:</span>
               <span className="text-sm text-gray-900">{processedRows.toLocaleString()}</span>
             </div>
           )}
           
-          {failedRows !== undefined && failedRows > 0 && (
+          {failedRows !== undefined && failedRows !== null && failedRows > 0 && (
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-gray-700">Failed:</span>
               <span className="text-sm text-red-600">{failedRows.toLocaleString()}</span>

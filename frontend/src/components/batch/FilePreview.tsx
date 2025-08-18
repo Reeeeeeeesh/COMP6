@@ -127,21 +127,21 @@ export const FilePreview: React.FC<FilePreviewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="text-2xl font-bold text-blue-900">
-                  {validationSummary.totalRows.toLocaleString()}
+                  {(validationSummary.totalRows ?? 0).toLocaleString()}
                 </div>
                 <div className="text-sm text-blue-700">Total Rows</div>
               </div>
               
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                 <div className="text-2xl font-bold text-green-900">
-                  {validationSummary.validRows.toLocaleString()}
+                  {(validationSummary.validRows ?? 0).toLocaleString()}
                 </div>
                 <div className="text-sm text-green-700">Valid Rows</div>
               </div>
               
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                 <div className="text-2xl font-bold text-red-900">
-                  {validationSummary.failedRows.toLocaleString()}
+                  {(validationSummary.failedRows ?? 0).toLocaleString()}
                 </div>
                 <div className="text-sm text-red-700">Failed Rows</div>
               </div>

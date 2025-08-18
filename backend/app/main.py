@@ -11,7 +11,7 @@ from .models import Session as SessionModel
 from .schemas import ApiResponse, SessionResponse
 from .services.session_service import SessionService
 from .services.data_retention_service import DataRetentionService
-from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios, dashboard, revenue_banding
+from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios, dashboard, revenue_banding, health, platform, input_catalog, plan_management, column_mapping, bonus_statements, executive_reporting
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,6 +61,27 @@ async def lifespan(app: FastAPI):
     logger.info("Starting FastAPI application")
     init_db()
     
+    # Initialize platform infrastructure
+    from .redis_client import is_redis_available
+    from .queue import queue_service
+    from .metrics import enable_metrics
+    
+    # Check Redis availability (non-blocking)
+    if is_redis_available():
+        logger.info("Redis connection established")
+    else:
+        logger.warning("Redis not available - running in degraded mode")
+    
+    # Check queue system (non-blocking)
+    if queue_service.is_available():
+        logger.info("Queue system available")
+    else:
+        logger.info("Queue system not available - falling back to synchronous processing")
+    
+    # Enable metrics collection
+    enable_metrics()
+    logger.info("Metrics collection enabled")
+    
     # Start periodic cleanup task
     global cleanup_task
     cleanup_task = asyncio.create_task(periodic_cleanup())
@@ -70,6 +91,16 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down FastAPI application")
+    
+    # Cleanup Redis connections
+    try:
+        from .redis_client import close_redis
+        close_redis()
+        logger.info("Redis connections closed")
+    except Exception as e:
+        logger.warning(f"Error closing Redis connections: {e}")
+    
+    # Cancel cleanup task
     if cleanup_task:
         cleanup_task.cancel()
         try:
@@ -78,11 +109,15 @@ async def lifespan(app: FastAPI):
             logger.info("Periodic cleanup task cancelled successfully")
 
 app = FastAPI(
-    title="Bonus Calculator API",
-    description="API for calculating employee bonuses with batch processing and scenario modeling",
-    version="1.0.0",
+    title="Compensation Platform API",
+    description="Pluggable bonus calculation platform for fund managers with multi-tenant support, configurable rules, and workflow automation",
+    version="2.0.0-dev",
     lifespan=lifespan
 )
+
+# Platform tenant middleware
+from .middleware import TenantMiddleware
+app.add_middleware(TenantMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -121,6 +156,27 @@ app.include_router(dashboard.router)  # Router already has prefix='/api/v1/dashb
 
 # Include revenue banding router (read-only for now)
 app.include_router(revenue_banding.router)
+
+# Include enhanced health monitoring (platform transformation)
+app.include_router(health.router)
+
+# Include platform transformation router
+app.include_router(platform.router, prefix="/api/v1")
+
+# Include input catalog router
+app.include_router(input_catalog.router, prefix="/api/v1")
+
+# Include plan management router
+app.include_router(plan_management.router, prefix="/api/v1")
+
+# Include column mapping router
+app.include_router(column_mapping.router, prefix="/api/v1")
+
+# Include bonus statements router (Task 20)
+app.include_router(bonus_statements.router, prefix="/api/v1")
+
+# Include executive reporting router (Task 21)
+app.include_router(executive_reporting.router)
 
 @app.get("/")
 async def root():
