@@ -63,6 +63,7 @@ frontend/node_modules/
 .roo/
 .roomodes
 .windsurfrules
+.claude/
 
 # Test data and temporary files
 hypothetical_fund_managers*.csv

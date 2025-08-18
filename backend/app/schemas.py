@@ -91,7 +91,7 @@ class ParameterPreset(ParameterPresetBase):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class BatchUploadBase(BaseModel):
@@ -415,3 +415,337 @@ class BandPreviewResponse(BaseModel):
     band: str
     multiplier: float
     components: BandPreviewComponents
+
+
+# ==============================================
+# Platform Transformation Schemas
+# ==============================================
+
+class TenantBase(BaseModel):
+    name: str
+    is_active: bool = True
+    tenant_metadata: Dict[str, Any] = {}
+
+class TenantCreate(TenantBase):
+    pass
+
+class TenantUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    tenant_metadata: Optional[Dict[str, Any]] = None
+
+class TenantResponse(TenantBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserBase(BaseModel):
+    email: str
+    display_name: Optional[str] = None
+    role: str = "readonly"  # admin, hr, manager, auditor, readonly
+    is_active: bool = True
+
+class UserCreate(UserBase):
+    tenant_id: str
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class UserResponse(UserBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    tenant_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class InputCatalogBase(BaseModel):
+    key: str
+    label: str
+    dtype: str  # decimal, int, text, date, bool
+    required: bool = False
+    default_value: Optional[Any] = None
+    validation: Dict[str, Any] = {}
+
+class InputCatalogCreate(InputCatalogBase):
+    tenant_id: str
+
+class InputCatalogUpdate(BaseModel):
+    label: Optional[str] = None
+    dtype: Optional[str] = None
+    required: Optional[bool] = None
+    default_value: Optional[Any] = None
+    validation: Optional[Dict[str, Any]] = None
+
+class InputCatalogResponse(InputCatalogBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    tenant_id: str
+    created_at: datetime
+
+
+class BonusPlanBase(BaseModel):
+    name: str
+    version: int
+    status: str = "draft"
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    notes: Optional[str] = None
+    plan_metadata: Dict[str, Any] = {}
+
+class BonusPlanCreate(BonusPlanBase):
+    tenant_id: str
+    created_by: Optional[str] = None
+
+class BonusPlanUpdate(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    notes: Optional[str] = None
+    plan_metadata: Optional[Dict[str, Any]] = None
+
+class BonusPlanResponse(BonusPlanBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    tenant_id: str
+    created_by: Optional[str] = None
+    created_at: datetime
+    locked_by: Optional[str] = None
+    locked_at: Optional[datetime] = None
+
+
+class PlanStepBase(BaseModel):
+    step_order: int
+    name: str
+    expr: str
+    condition_expr: Optional[str] = None
+    outputs: List[str] = []
+    notes: Optional[str] = None
+
+class PlanStepCreate(PlanStepBase):
+    plan_id: str
+
+class PlanStepUpdate(BaseModel):
+    step_order: Optional[int] = None
+    name: Optional[str] = None
+    expr: Optional[str] = None
+    condition_expr: Optional[str] = None
+    outputs: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+class PlanStepResponse(PlanStepBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    plan_id: str
+
+
+class PlanInputBase(BaseModel):
+    required: bool = True
+    source_mapping: Dict[str, Any] = {}
+
+class PlanInputCreate(PlanInputBase):
+    plan_id: str
+    input_id: str
+
+class PlanInputResponse(PlanInputBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    plan_id: str
+    input_id: str
+
+
+class PlanRunBase(BaseModel):
+    scenario_name: Optional[str] = None
+    approvals_state: Dict[str, Any] = {"state": "draft", "history": []}
+    snapshot_hash: str
+    status: str = "draft"
+
+class PlanRunCreate(PlanRunBase):
+    tenant_id: str
+    plan_id: str
+    upload_id: Optional[str] = None
+
+class PlanRunUpdate(BaseModel):
+    scenario_name: Optional[str] = None
+    approvals_state: Optional[Dict[str, Any]] = None
+    status: Optional[str] = None
+    finished_at: Optional[datetime] = None
+
+class PlanRunResponse(PlanRunBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    tenant_id: str
+    plan_id: str
+    upload_id: Optional[str] = None
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+
+
+class AuditEventBase(BaseModel):
+    action: str
+    entity: str
+    entity_id: str
+    before: Optional[Dict[str, Any]] = None
+    after: Optional[Dict[str, Any]] = None
+    signature: Optional[str] = None
+
+class AuditEventCreate(AuditEventBase):
+    tenant_id: str
+    actor_user_id: Optional[str] = None
+
+class AuditEventResponse(AuditEventBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: int
+    tenant_id: str
+    actor_user_id: Optional[str] = None
+    at: datetime
+
+
+# Platform API responses
+class PlatformApiResponse(BaseModel):
+    """Enhanced API response for platform transformation."""
+    success: bool
+    message: Optional[str] = None
+    data: Optional[Any] = None
+    error: Optional[str] = None
+    tenant_id: Optional[str] = None
+    timestamp: datetime = datetime.utcnow()
+
+
+# ================================
+# Bonus Statement Schemas (Task 20)
+# ================================
+
+class BonusStatementRequest(BaseModel):
+    """Request model for generating individual bonus statements."""
+    employee_ref: str
+    format: str = Field(..., description="Statement format: 'pdf' or 'xlsx'")
+    include_calculation_steps: bool = Field(default=True, description="Include step-by-step calculation breakdown")
+    company_name: Optional[str] = Field(default="Fund Management Company", description="Company name for statement header")
+    statement_date: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Statement generation date")
+    
+    @field_validator('format')
+    @classmethod
+    def validate_format(cls, v):
+        if v.lower() not in ['pdf', 'xlsx']:
+            raise ValueError("Format must be 'pdf' or 'xlsx'")
+        return v.lower()
+
+class BonusStatementData(BaseModel):
+    """Comprehensive data model for bonus statement generation."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    # Employee Information
+    employee_ref: str
+    first_name: str
+    last_name: str
+    email: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
+    hire_date: Optional[datetime] = None
+    
+    # Compensation Information
+    base_salary: float
+    bonus_percentage: float
+    bonus_amount: float
+    total_compensation: float
+    
+    # Plan Information
+    plan_name: str
+    plan_version: int
+    calculation_date: datetime
+    
+    # Statement Metadata
+    statement_date: datetime
+    company_name: str
+    
+    # Optional Calculation Steps (from Task 18)
+    calculation_steps: Optional[List[Dict[str, Any]]] = None
+
+class BonusStatementResponse(BaseModel):
+    """Response model for generated bonus statements."""
+    success: bool
+    employee_ref: str
+    format: str
+    file_size_bytes: int
+    generation_time_seconds: float
+    download_url: Optional[str] = None
+    filename: str
+    message: Optional[str] = None
+
+
+# ================================
+# Executive Reporting Schemas (Task 21)
+# ================================
+
+class PoolVsTargetAnalysis(BaseModel):
+    """Pool vs target analysis for executive reporting."""
+    plan_id: str
+    plan_name: str
+    target_pool: Optional[float] = None
+    actual_pool: float
+    pool_utilization: float  # actual / target ratio
+    employee_count: int
+    avg_bonus_per_employee: float
+    variance_from_target: Optional[float] = None
+    status: str  # over_target, under_target, on_target, no_target
+    last_calculated: datetime
+
+class TrendDataPoint(BaseModel):
+    """Single data point for trend analysis."""
+    period: str  # "2025-08", "Q3-2025", etc.
+    metric_name: str
+    value: float
+    comparison_value: Optional[float] = None  # previous period
+    change_percentage: Optional[float] = None
+
+class ExecutiveSummary(BaseModel):
+    """Executive summary for dynamic reporting."""
+    tenant_id: str
+    reporting_period: str
+    total_plans_executed: int
+    total_employees_processed: int
+    total_bonus_pool_distributed: float
+    average_bonus_percentage: float
+    pool_vs_target_summary: Dict[str, Any]
+    trending_metrics: List[TrendDataPoint]
+    top_performing_plans: List[Dict[str, Any]]
+    generated_at: datetime
+
+class ReportingFilters(BaseModel):
+    """Filters for dynamic reporting requests."""
+    tenant_id: Optional[str] = None
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    plan_ids: Optional[List[str]] = None
+    department_filter: Optional[str] = None
+    include_archived: bool = False
+    metric_types: Optional[List[str]] = None  # pool_analysis, trends, summary
+
+class DynamicReportRequest(BaseModel):
+    """Request model for dynamic reporting."""
+    report_type: str = Field(..., description="Type of report: 'pool_analysis', 'trends', 'executive_summary'")
+    filters: ReportingFilters
+    grouping: Optional[str] = Field(default="month", description="Time grouping: 'day', 'week', 'month', 'quarter'")
+    include_details: bool = Field(default=False, description="Include detailed breakdown data")
+    
+    @field_validator('report_type')
+    @classmethod
+    def validate_report_type(cls, v):
+        valid_types = ['pool_analysis', 'trends', 'executive_summary', 'combined']
+        if v not in valid_types:
+            raise ValueError(f"Report type must be one of: {valid_types}")
+        return v

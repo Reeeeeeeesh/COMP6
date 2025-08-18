@@ -147,10 +147,25 @@ async def get_batch_calculation_results(
         BatchCalculationResult.batch_upload_id == upload_id
     ).all()
 
+    # Convert SQLAlchemy models to dictionaries for JSON serialization
+    results_data = []
+    for result in results:
+        result_dict = {
+            "id": result.id,
+            "batch_upload_id": result.batch_upload_id,
+            "total_bonus_amount": float(result.total_bonus_amount) if result.total_bonus_amount else 0.0,
+            "average_bonus_percentage": float(result.average_bonus_percentage) if result.average_bonus_percentage else 0.0,
+            "total_employees": result.total_employees,
+            "total_base_salary": float(result.total_base_salary) if result.total_base_salary else 0.0,
+            "calculated_at": result.calculated_at.isoformat() if result.calculated_at else None,
+            "calculation_parameters": result.calculation_parameters
+        }
+        results_data.append(result_dict)
+    
     return ApiResponse(
         success=True,
         message=f"Found {len(results)} results for upload {upload_id}",
-        data=results
+        data=results_data
     )
 
 
@@ -176,10 +191,22 @@ async def get_batch_calculation_result(
     if not result:
         raise HTTPException(status_code=404, detail=f"Batch calculation result with ID {result_id} not found")
 
+    # Convert SQLAlchemy model to dictionary for JSON serialization
+    result_dict = {
+        "id": result.id,
+        "batch_upload_id": result.batch_upload_id,
+        "total_bonus_amount": float(result.total_bonus_amount) if result.total_bonus_amount else 0.0,
+        "average_bonus_percentage": float(result.average_bonus_percentage) if result.average_bonus_percentage else 0.0,
+        "total_employees": result.total_employees,
+        "total_base_salary": float(result.total_base_salary) if result.total_base_salary else 0.0,
+        "calculated_at": result.calculated_at.isoformat() if result.calculated_at else None,
+        "calculation_parameters": result.calculation_parameters
+    }
+    
     return ApiResponse(
         success=True,
         message="Batch calculation result retrieved successfully",
-        data=result
+        data=result_dict
     )
 
 
@@ -281,10 +308,37 @@ async def get_employee_calculation_results(
     # Execute query
     employee_results = query.all()
 
+    # Convert SQLAlchemy models to dictionaries for JSON serialization
+    employee_results_data = []
+    for emp_result in employee_results:
+        result_dict = {
+            "id": emp_result.id,
+            "employee_data_id": emp_result.employee_data_id,
+            "batch_result_id": emp_result.batch_result_id,
+            "base_salary": float(emp_result.base_salary) if emp_result.base_salary else 0.0,
+            "bonus_percentage": float(emp_result.bonus_percentage) if emp_result.bonus_percentage else 0.0,
+            "bonus_amount": float(emp_result.bonus_amount) if emp_result.bonus_amount else 0.0,
+            "total_compensation": float(emp_result.total_compensation) if emp_result.total_compensation else 0.0,
+            "calculation_breakdown": emp_result.calculation_breakdown,
+            "calculated_at": emp_result.calculated_at.isoformat() if emp_result.calculated_at else None,
+            # Include employee data from the joined relationship
+            "employee_data": {
+                "employee_id": emp_result.employee_data.employee_id if emp_result.employee_data else None,
+                "first_name": emp_result.employee_data.first_name if emp_result.employee_data else None,
+                "last_name": emp_result.employee_data.last_name if emp_result.employee_data else None,
+                "email": emp_result.employee_data.email if emp_result.employee_data else None,
+                "department": emp_result.employee_data.department if emp_result.employee_data else None,
+                "position": emp_result.employee_data.position if emp_result.employee_data else None,
+                "salary": float(emp_result.employee_data.salary) if emp_result.employee_data and emp_result.employee_data.salary else 0.0,
+                "hire_date": emp_result.employee_data.hire_date.isoformat() if emp_result.employee_data and emp_result.employee_data.hire_date else None
+            } if emp_result.employee_data else None
+        }
+        employee_results_data.append(result_dict)
+    
     return ApiResponse(
         success=True,
         message=f"Found {len(employee_results)} employee results",
-        data=employee_results
+        data=employee_results_data
     )
 
 

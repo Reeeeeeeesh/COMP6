@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Upload, Calculate, PlayArrow, Settings } from '@mui/icons-material';
+import { Home, Upload, Calculate, PlayArrow, Settings, Assessment } from '@mui/icons-material';
 
 interface NavigationHeaderProps {
   title?: string;
@@ -18,6 +18,7 @@ export const NavigationHeader: React.FC<NavigationHeaderProps> = ({
     { path: '/batch', label: 'Batch Upload', icon: Upload },
     { path: '/calculator', label: 'Calculator', icon: Calculate },
     { path: '/scenarios', label: 'Scenarios', icon: PlayArrow },
+    { path: '/admin/executive-reporting', label: 'Executive', icon: Assessment },
     { path: '/admin/revenue-banding', label: 'Admin', icon: Settings },
   ];
 

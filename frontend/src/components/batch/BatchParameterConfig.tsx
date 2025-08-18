@@ -1183,7 +1183,7 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
               Total Bonus Pool
             </label>
             <span className="text-lg font-bold text-blue-600">
-              £{(parameters.totalBonusPool !== undefined ? parameters.totalBonusPool : 1000000).toLocaleString()}
+              £{(parameters.totalBonusPool !== undefined && parameters.totalBonusPool !== null ? parameters.totalBonusPool : 1000000).toLocaleString()}
             </span>
           </div>
           
@@ -1195,7 +1195,7 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
                 type="number"
                 min="0"
                 step="10000"
-                value={parameters.totalBonusPool !== undefined ? parameters.totalBonusPool : 1000000}
+                value={parameters.totalBonusPool !== undefined && parameters.totalBonusPool !== null ? parameters.totalBonusPool : 1000000}
                 onChange={(e) => handleChange('totalBonusPool', Number(e.target.value))}
                 className={`w-full p-1 text-right bg-gray-100 focus:outline-none ${parameters.useBonusPoolLimit ? 'text-blue-600 font-medium' : 'text-gray-400'} ${errors.totalBonusPool ? 'text-red-500' : ''}`}
                 disabled={!parameters.useBonusPoolLimit}

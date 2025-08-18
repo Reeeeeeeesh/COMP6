@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Float, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Float, JSON, Numeric
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime, timedelta
@@ -234,3 +236,258 @@ class RevenueBandConfig(Base):
     settings = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+# ==============================================
+# Platform Transformation Models (Multi-Tenant)
+# ==============================================
+
+class Tenant(Base):
+    """Multi-tenant organization model for platform transformation."""
+    __tablename__ = "tenants"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    is_active = Column(Boolean, nullable=False, default=True)
+    tenant_metadata = Column(JSON, nullable=False, default=lambda: {})
+    
+    # Relationships
+    users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    input_catalog = relationship("InputCatalog", back_populates="tenant", cascade="all, delete-orphan")
+    bonus_plans = relationship("BonusPlan", back_populates="tenant", cascade="all, delete-orphan")
+
+
+class User(Base):
+    """Platform user model with role-based access control."""
+    __tablename__ = "users"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    email = Column(String, nullable=False, index=True)
+    display_name = Column(String)
+    role = Column(String, nullable=False, default="readonly")  # admin, hr, manager, auditor, readonly
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    is_active = Column(Boolean, nullable=False, default=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="users")
+    created_plans = relationship("BonusPlan", foreign_keys="BonusPlan.created_by", back_populates="creator")
+    locked_plans = relationship("BonusPlan", foreign_keys="BonusPlan.locked_by", back_populates="locker")
+    audit_events = relationship("AuditEvent", back_populates="actor")
+    
+    # Unique constraint on tenant + email
+    __table_args__ = (
+        {'schema': None},  # Will be set to 'comp' schema in production
+    )
+
+
+class InputCatalog(Base):
+    """Catalog of input parameters for bonus calculations."""
+    __tablename__ = "input_catalog"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    key = Column(String, nullable=False)  # e.g., 'employee_score', 'aum', 'fund_return'
+    label = Column(String, nullable=False)
+    dtype = Column(String, nullable=False)  # decimal, int, text, date, bool
+    required = Column(Boolean, nullable=False, default=False)
+    default_value = Column(JSON)
+    validation = Column(JSON, nullable=False, default=lambda: {})
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="input_catalog")
+    plan_inputs = relationship("PlanInput", back_populates="input_definition")
+    
+    # Unique constraint on tenant + key
+    __table_args__ = (
+        {'schema': None},
+    )
+
+
+class BonusPlan(Base):
+    """Configurable bonus calculation plans."""
+    __tablename__ = "bonus_plans"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)  # e.g., "2025 Analyst Bonus Plan"
+    version = Column(Integer, nullable=False)  # immutable after lock
+    status = Column(String, nullable=False, default="draft")  # draft, approved, locked, archived
+    effective_from = Column(DateTime)
+    effective_to = Column(DateTime)
+    notes = Column(Text)
+    plan_metadata = Column(JSON, nullable=False, default=lambda: {})
+    created_by = Column(String, ForeignKey("users.id"))
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    locked_by = Column(String, ForeignKey("users.id"))
+    locked_at = Column(DateTime)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="bonus_plans")
+    creator = relationship("User", foreign_keys=[created_by], back_populates="created_plans")
+    locker = relationship("User", foreign_keys=[locked_by], back_populates="locked_plans")
+    plan_inputs = relationship("PlanInput", back_populates="plan", cascade="all, delete-orphan")
+    plan_steps = relationship("PlanStep", back_populates="plan", cascade="all, delete-orphan")
+    bonus_pools = relationship("BonusPool", back_populates="plan", cascade="all, delete-orphan")
+    plan_runs = relationship("PlanRun", back_populates="plan")
+    
+    # Unique constraint on tenant + name + version
+    __table_args__ = (
+        {'schema': None},
+    )
+
+
+class PlanInput(Base):
+    """Input parameters associated with a bonus plan."""
+    __tablename__ = "plan_inputs"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    plan_id = Column(String, ForeignKey("bonus_plans.id"), nullable=False, index=True)
+    input_id = Column(String, ForeignKey("input_catalog.id"), nullable=False)
+    required = Column(Boolean, nullable=False, default=True)
+    source_mapping = Column(JSON, nullable=False, default=lambda: {})  # CSV column names, transforms
+    
+    # Relationships
+    plan = relationship("BonusPlan", back_populates="plan_inputs")
+    input_definition = relationship("InputCatalog", back_populates="plan_inputs")
+
+
+class PlanStep(Base):
+    """Individual calculation steps within a bonus plan."""
+    __tablename__ = "plan_steps"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    plan_id = Column(String, ForeignKey("bonus_plans.id"), nullable=False, index=True)
+    step_order = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)  # e.g., "performance_multiplier"
+    expr = Column(Text, nullable=False)  # DSL or CEL/JSONLogic string
+    condition_expr = Column(Text)  # optional IF guard
+    outputs = Column(JSON, nullable=False, default=lambda: [])  # which variables this step defines
+    notes = Column(Text)
+    
+    # Relationships
+    plan = relationship("BonusPlan", back_populates="plan_steps")
+    
+    # Unique constraint on plan + step_order
+    __table_args__ = (
+        {'schema': None},
+    )
+
+
+class BonusPool(Base):
+    """Bonus pool definitions for plans."""
+    __tablename__ = "bonus_pools"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    plan_id = Column(String, ForeignKey("bonus_plans.id"), nullable=False, index=True)
+    currency = Column(String(3), nullable=False)
+    amount = Column(Numeric(38, 10), nullable=False)  # High precision for financial calculations
+    allocation_rules = Column(JSON, nullable=False, default=lambda: [])
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    plan = relationship("BonusPlan", back_populates="bonus_pools")
+
+
+class PlatformUpload(Base):
+    """Enhanced upload tracking for platform transformation."""
+    __tablename__ = "platform_uploads"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    created_by = Column(String, ForeignKey("users.id"))
+    filename = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="received")  # received, processing, failed, ready
+    file_size = Column(Integer)
+    upload_metadata = Column(JSON, nullable=False, default=lambda: {})
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    employee_rows = relationship("EmployeeRow", back_populates="upload", cascade="all, delete-orphan")
+    plan_runs = relationship("PlanRun", back_populates="upload")
+
+
+class EmployeeRow(Base):
+    """Employee data rows from platform uploads."""
+    __tablename__ = "employee_rows"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    upload_id = Column(String, ForeignKey("platform_uploads.id"), nullable=False, index=True)
+    employee_ref = Column(String, nullable=False)  # external id or HR id
+    raw = Column(JSON, nullable=False)  # raw mapped fields as JSON
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    upload = relationship("PlatformUpload", back_populates="employee_rows")
+
+
+class PlanRun(Base):
+    """Execution runs of bonus plans."""
+    __tablename__ = "plan_runs"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    plan_id = Column(String, ForeignKey("bonus_plans.id"), nullable=False, index=True)
+    upload_id = Column(String, ForeignKey("platform_uploads.id"))
+    scenario_name = Column(String)
+    approvals_state = Column(JSON, nullable=False, default=lambda: {"state": "draft", "history": []})
+    snapshot_hash = Column(String, nullable=False)  # hash of plan+steps+inputs+funcs
+    started_at = Column(DateTime, nullable=False, default=func.now())
+    finished_at = Column(DateTime)
+    status = Column(String, nullable=False, default="draft")  # draft, manager_approved, hr_approved, finance_approved, finalized, failed
+    
+    # Relationships
+    plan = relationship("BonusPlan", back_populates="plan_runs")
+    upload = relationship("PlatformUpload", back_populates="plan_runs")
+    step_results = relationship("RunStepResult", back_populates="run", cascade="all, delete-orphan")
+    totals = relationship("RunTotals", back_populates="run", uselist=False, cascade="all, delete-orphan")
+
+
+class RunStepResult(Base):
+    """Results of individual calculation steps per employee."""
+    __tablename__ = "run_step_results"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    run_id = Column(String, ForeignKey("plan_runs.id"), nullable=False, index=True)
+    employee_ref = Column(String, nullable=False)
+    step_name = Column(String, nullable=False)
+    value = Column(JSON, nullable=False)  # store numeric as string inside JSON for precision
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    run = relationship("PlanRun", back_populates="step_results")
+
+
+class RunTotals(Base):
+    """Aggregated totals for plan runs."""
+    __tablename__ = "run_totals"
+    
+    run_id = Column(String, ForeignKey("plan_runs.id"), primary_key=True)
+    totals = Column(JSON, nullable=False, default=lambda: {})  # aggregated metrics, pool usage, etc.
+    
+    # Relationships
+    run = relationship("PlanRun", back_populates="totals")
+
+
+class AuditEvent(Base):
+    """Comprehensive audit trail for platform actions."""
+    __tablename__ = "audit_events"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)  # Use bigserial equivalent
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    actor_user_id = Column(String, ForeignKey("users.id"))
+    action = Column(String, nullable=False)  # 'plan.create', 'run.finalize', etc.
+    entity = Column(String, nullable=False)  # 'bonus_plan', 'plan_run', 'upload', ...
+    entity_id = Column(String, nullable=False)
+    before = Column(JSON)
+    after = Column(JSON)
+    at = Column(DateTime, nullable=False, default=func.now())
+    signature = Column(String)  # optional tamper-evident chain
+    
+    # Relationships
+    actor = relationship("User", back_populates="audit_events")
