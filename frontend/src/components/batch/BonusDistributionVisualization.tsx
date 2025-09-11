@@ -17,7 +17,10 @@ import {
   TableHead,
   TableRow,
   Chip,
-  IconButton
+  IconButton,
+  Switch,
+  FormControlLabel,
+  Tooltip
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
 import {
@@ -33,6 +36,8 @@ import {
   Cell,
   ResponsiveContainer
 } from 'recharts';
+import { AdvancedVisualizationLibrary, VisualizationData } from '../visualization/AdvancedVisualizationLibrary';
+import { InteractiveHeatmap, HeatmapDataPoint } from '../visualization/InteractiveHeatmap';
 import { formatCurrency, formatPercentage } from '../../utils/formatters';
 import { getBonusDistributionAnalysis } from '../../services/batchCalculationService';
 
@@ -113,6 +118,7 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
     title: string;
     employees: Employee[];
   } | null>(null);
+  const [useAdvancedVisualizations, setUseAdvancedVisualizations] = useState(false);
 
   useEffect(() => {
     const fetchDistributionData = async () => {
@@ -146,6 +152,63 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
   const handleCloseDrillDown = () => {
     setDrillDownOpen(false);
     setSelectedGroup(null);
+  };
+
+  // Convert distribution data to advanced visualization format
+  const convertToAdvancedVisualizationData = (distributionArray: any[]): VisualizationData[] => {
+    return distributionArray.map(item => ({
+      name: item.range || item.department,
+      value: item.count,
+      category: 'Distribution',
+      trend: Math.random() * 20 - 10, // Simulated trend data
+      metadata: {
+        totalBonus: item.totalBonus,
+        avgBonusPct: item.avgBonusPct,
+        employees: item.employees
+      }
+    }));
+  };
+
+  // Convert distribution data to heatmap format
+  const convertToHeatmapData = (): HeatmapDataPoint[] => {
+    if (!data) return [];
+    
+    const heatmapData: HeatmapDataPoint[] = [];
+    
+    // Create a matrix view of departments vs salary ranges
+    data.department_distribution.forEach(dept => {
+      data.salary_range_distribution.forEach(range => {
+        // Find employees in this department and range
+        const matchingEmployees = dept.employees.filter(emp => {
+          const empRange = getSalaryRange(emp.salary);
+          return empRange === range.range;
+        });
+
+        heatmapData.push({
+          x: dept.department,
+          y: range.range,
+          value: matchingEmployees.length,
+          label: `${dept.department} - ${range.range}`,
+          metadata: {
+            employees: matchingEmployees,
+            avgBonus: matchingEmployees.reduce((acc, emp) => acc + emp.bonus_amount, 0) / (matchingEmployees.length || 1),
+            totalBonus: matchingEmployees.reduce((acc, emp) => acc + emp.bonus_amount, 0)
+          }
+        });
+      });
+    });
+
+    return heatmapData;
+  };
+
+  // Helper function to determine salary range
+  const getSalaryRange = (salary: number): string => {
+    if (salary < 50000) return '< £50k';
+    if (salary < 75000) return '£50k-£75k';
+    if (salary < 100000) return '£75k-£100k';
+    if (salary < 150000) return '£100k-£150k';
+    if (salary < 200000) return '£150k-£200k';
+    return '£200k+';
   };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -235,12 +298,31 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
 
   return (
     <Paper elevation={2} sx={{ padding: 3, marginBottom: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        Bonus Distribution Analysis
-      </Typography>
-      <Typography variant="body2" color="text.secondary" gutterBottom>
-        Interactive analysis of bonus distribution across salary ranges, departments, and bonus percentage ranges
-      </Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" marginBottom={2}>
+        <Box>
+          <Typography variant="h5" gutterBottom>
+            Bonus Distribution Analysis
+          </Typography>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Interactive analysis of bonus distribution across salary ranges, departments, and bonus percentage ranges
+          </Typography>
+        </Box>
+        <Box>
+          <Tooltip title="Toggle between standard and advanced visualization modes">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={useAdvancedVisualizations}
+                  onChange={(e) => setUseAdvancedVisualizations(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Advanced Viz"
+              labelPlacement="start"
+            />
+          </Tooltip>
+        </Box>
+      </Box>
 
       <Tabs value={activeTab} onChange={handleTabChange} sx={{ marginBottom: 3 }}>
         <Tab label="Salary Ranges" />
@@ -260,36 +342,53 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
               <Typography variant="subtitle2" gutterBottom>
                 Employee Count and Average Bonus %
               </Typography>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={data.salary_range_distribution}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="range" 
-                    tick={{ fontSize: 12 }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                  />
-                  <YAxis yAxisId="left" orientation="left" />
-                  <YAxis yAxisId="right" orientation="right" />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Bar 
-                    yAxisId="left"
-                    dataKey="count" 
-                    fill={COLORS[0]} 
-                    name="Employee Count"
-                    onClick={(data) => handleDrillDown(`Salary Range: ${data.range}`, data.employees)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <Bar 
-                    yAxisId="right"
-                    dataKey="avgBonusPct" 
-                    fill={COLORS[1]} 
-                    name="Avg Bonus %"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              {useAdvancedVisualizations ? (
+                <AdvancedVisualizationLibrary
+                  type="bar"
+                  data={convertToAdvancedVisualizationData(data.salary_range_distribution)}
+                  config={{
+                    xAxis: { dataKey: 'name', label: 'Salary Range' },
+                    yAxis: { label: 'Employee Count' },
+                    colors: COLORS,
+                    showLegend: true,
+                    showTooltip: true,
+                    onClick: (data: any) => handleDrillDown(`Salary Range: ${data.name}`, data.metadata.employees)
+                  }}
+                  height={400}
+                  width="100%"
+                />
+              ) : (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={data.salary_range_distribution}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="range" 
+                      tick={{ fontSize: 12 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={80}
+                    />
+                    <YAxis yAxisId="left" orientation="left" />
+                    <YAxis yAxisId="right" orientation="right" />
+                    <RechartsTooltip content={<CustomTooltip />} />
+                    <Legend />
+                    <Bar 
+                      yAxisId="left"
+                      dataKey="count" 
+                      fill={COLORS[0]} 
+                      name="Employee Count"
+                      onClick={(data) => handleDrillDown(`Salary Range: ${data.range}`, data.employees)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <Bar 
+                      yAxisId="right"
+                      dataKey="avgBonusPct" 
+                      fill={COLORS[1]} 
+                      name="Avg Bonus %"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </Box>
 
             {/* Pie Chart */}
@@ -319,6 +418,36 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
               </ResponsiveContainer>
             </Box>
           </Box>
+
+          {/* Advanced Heatmap View */}
+          {useAdvancedVisualizations && (
+            <Box marginTop={4}>
+              <Typography variant="h6" gutterBottom>
+                Department vs Salary Range Heatmap
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Interactive heatmap showing employee distribution across departments and salary ranges
+              </Typography>
+              <InteractiveHeatmap
+                data={convertToHeatmapData()}
+                title="Employee Distribution Matrix"
+                colorScheme="sequential"
+                height={400}
+                width="100%"
+                showTooltip={true}
+                cellSize={{ width: 100, height: 50 }}
+                margin={{ top: 60, right: 20, bottom: 80, left: 120 }}
+                onCellClick={(point) => {
+                  if (point.metadata?.employees) {
+                    handleDrillDown(
+                      `${point.x} - ${point.y}`,
+                      point.metadata.employees
+                    );
+                  }
+                }}
+              />
+            </Box>
+          )}
         </Box>
       )}
 
@@ -334,25 +463,43 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
               <Typography variant="subtitle2" gutterBottom>
                 Employee Count by Bonus Percentage Range
               </Typography>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={data.bonus_percentage_distribution}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="range" 
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Bar 
-                    dataKey="count" 
-                    fill={COLORS[2]} 
-                    name="Employee Count"
-                    onClick={(data) => handleDrillDown(`Bonus Range: ${data.range}`, data.employees)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              {useAdvancedVisualizations ? (
+                <AdvancedVisualizationLibrary
+                  type="line"
+                  data={convertToAdvancedVisualizationData(data.bonus_percentage_distribution)}
+                  config={{
+                    xAxis: { dataKey: 'name', label: 'Bonus Range' },
+                    yAxis: { label: 'Employee Count' },
+                    colors: [COLORS[2]],
+                    showLegend: true,
+                    showTooltip: true,
+                    showTrend: true,
+                    onClick: (data: any) => handleDrillDown(`Bonus Range: ${data.name}`, data.metadata.employees)
+                  }}
+                  height={400}
+                  width="100%"
+                />
+              ) : (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={data.bonus_percentage_distribution}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="range" 
+                      tick={{ fontSize: 12 }}
+                    />
+                    <YAxis />
+                    <RechartsTooltip content={<CustomTooltip />} />
+                    <Legend />
+                    <Bar 
+                      dataKey="count" 
+                      fill={COLORS[2]} 
+                      name="Employee Count"
+                      onClick={(data) => handleDrillDown(`Bonus Range: ${data.range}`, data.employees)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </Box>
 
             {/* Pie Chart */}
@@ -397,36 +544,59 @@ const BonusDistributionVisualization: React.FC<BonusDistributionVisualizationPro
               <Typography variant="subtitle2" gutterBottom>
                 Department Analysis
               </Typography>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={data.department_distribution}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="department" 
-                    tick={{ fontSize: 12 }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                  />
-                  <YAxis yAxisId="left" orientation="left" />
-                  <YAxis yAxisId="right" orientation="right" />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Bar 
-                    yAxisId="left"
-                    dataKey="count" 
-                    fill={COLORS[3]} 
-                    name="Employee Count"
-                    onClick={(data) => handleDrillDown(`Department: ${data.department}`, data.employees)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <Bar 
-                    yAxisId="right"
-                    dataKey="avgBonusPct" 
-                    fill={COLORS[4]} 
-                    name="Avg Bonus %"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              {useAdvancedVisualizations ? (
+                <AdvancedVisualizationLibrary
+                  type="composed"
+                  data={convertToAdvancedVisualizationData(data.department_distribution)}
+                  config={{
+                    xAxis: { dataKey: 'name', label: 'Department' },
+                    yAxis: { label: 'Employee Count / Avg Bonus %' },
+                    colors: [COLORS[3], COLORS[4]],
+                    showLegend: true,
+                    showTooltip: true,
+                    bars: [
+                      { dataKey: 'value', name: 'Employee Count', fill: COLORS[3] }
+                    ],
+                    lines: [
+                      { dataKey: 'trend', name: 'Trend', stroke: COLORS[4], strokeWidth: 3 }
+                    ],
+                    onClick: (data: any) => handleDrillDown(`Department: ${data.name}`, data.metadata.employees)
+                  }}
+                  height={400}
+                  width="100%"
+                />
+              ) : (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={data.department_distribution}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="department" 
+                      tick={{ fontSize: 12 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={80}
+                    />
+                    <YAxis yAxisId="left" orientation="left" />
+                    <YAxis yAxisId="right" orientation="right" />
+                    <RechartsTooltip content={<CustomTooltip />} />
+                    <Legend />
+                    <Bar 
+                      yAxisId="left"
+                      dataKey="count" 
+                      fill={COLORS[3]} 
+                      name="Employee Count"
+                      onClick={(data) => handleDrillDown(`Department: ${data.department}`, data.employees)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <Bar 
+                      yAxisId="right"
+                      dataKey="avgBonusPct" 
+                      fill={COLORS[4]} 
+                      name="Avg Bonus %"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </Box>
 
             {/* Pie Chart */}

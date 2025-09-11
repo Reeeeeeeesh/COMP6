@@ -1,18 +1,22 @@
-import React, { useCallback, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Alert, Snackbar } from '@mui/material';
 import { API_BASE_URL } from '../../config';
 
-interface FileUploadProps {
+export interface FileUploadProps {
   onFileSelect: (file: File) => void;
   disabled?: boolean;
   sessionId: string;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({
+export type FileUploadHandle = {
+  open: () => void;
+};
+
+export const FileUpload = forwardRef<FileUploadHandle, FileUploadProps>(({ 
   onFileSelect,
   disabled = false,
   sessionId: _sessionId
-}) => {
+}, ref) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -125,6 +129,15 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   }, [disabled]);
 
+  // Expose an imperative method so parent can open the file dialog
+  useImperativeHandle(ref, () => ({
+    open: () => {
+      if (!disabled && fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+    }
+  }), [disabled]);
+
   const handleRemoveFile = useCallback(() => {
     setSelectedFile(null);
     if (fileInputRef.current) {
@@ -210,8 +223,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
+            onClick={handleBrowseClick}
           >
             <input
+              id="file-upload-input"
               ref={fileInputRef}
               type="file"
               accept=".csv,.txt"
@@ -235,13 +250,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               <div>
                 <p className="text-lg text-gray-600">
                   Drag and drop your CSV file here, or{' '}
-                  <button
-                    onClick={handleBrowseClick}
-                    disabled={disabled}
-                    className="text-blue-600 hover:text-blue-500 font-medium focus:outline-none focus:underline"
+                  <label
+                    htmlFor="file-upload-input"
+                    className="text-blue-600 hover:text-blue-500 font-medium focus:outline-none focus:underline cursor-pointer"
+                    aria-label="Browse to upload a file"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                    }}
                   >
                     browse to upload
-                  </button>
+                  </label>
                 </p>
                 <p className="text-sm text-gray-500 mt-2">
                   Supports CSV files up to 10MB with maximum 10,000 rows
@@ -287,6 +305,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         {selectedFile && (
           <div className="flex justify-end">
             <button
+              type="button"
               onClick={handleUpload}
               disabled={disabled || !selectedFile}
               className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -328,4 +347,4 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       </Snackbar>
     </div>
   );
-};
+});

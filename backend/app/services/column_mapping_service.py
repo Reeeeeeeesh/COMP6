@@ -292,8 +292,10 @@ class ColumnMappingService:
         mapping = {}
         
         for suggestion in mapping_analysis.suggestions:
-            # Only include high-confidence suggestions
-            if suggestion.confidence >= 0.7:
+            # Only auto-map when we are 100% confident (exact match).
+            # This avoids incorrect auto-mapping from fuzzy/alias/content matches.
+            # Confidence is represented as 0.0-1.0; exact matches yield 1.0 in _try_exact_match.
+            if suggestion.match_type == 'exact' and suggestion.confidence >= 1.0:
                 mapping[suggestion.csv_column] = suggestion.system_field
         
         return mapping

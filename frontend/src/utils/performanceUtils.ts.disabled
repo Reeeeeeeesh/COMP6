@@ -1,0 +1,622 @@
+import React, { Suspense, lazy, ComponentType } from 'react';
+import { CircularProgress, Box, Skeleton, Alert } from '@mui/material';
+
+// Performance monitoring utilities
+interface PerformanceMetrics {
+  loadTime: number;
+  renderTime: number;
+  interactionTime: number;
+  memoryUsage: number;
+  networkLatency: number;
+  bundleSize: number;
+}
+
+interface CacheConfig {
+  maxAge: number; // in milliseconds
+  maxSize: number; // number of entries
+  enableCompression: boolean;
+  persistToStorage: boolean;
+}
+
+interface LazyComponentOptions {
+  fallback?: React.ComponentType;
+  errorFallback?: React.ComponentType<{ error: Error; retry: () => void }>;
+  timeout?: number;
+  preload?: boolean;
+  chunkName?: string;
+}
+
+// Memory-based cache with TTL and size limits
+class MemoryCache {
+  private cache = new Map<string, { data: any; timestamp: number; size: number }>();
+  private totalSize = 0;
+  
+  constructor(private config: CacheConfig) {}
+
+  set(key: string, data: any): void {
+    const size = this.estimateSize(data);
+    const timestamp = Date.now();
+
+    // Remove expired entries
+    this.cleanup();
+
+    // Remove oldest entries if cache is full
+    while (this.cache.size >= this.config.maxSize && this.cache.size > 0) {
+      const oldestKey = this.cache.keys().next().value;
+      this.delete(oldestKey);
+    }
+
+    // Add new entry
+    this.cache.set(key, { data, timestamp, size });
+    this.totalSize += size;
+
+    // Persist to storage if configured
+    if (this.config.persistToStorage) {
+      try {
+        localStorage.setItem(`cache_${key}`, JSON.stringify({ data, timestamp }));
+      } catch (error) {
+        console.warn('Failed to persist cache to localStorage:', error);
+      }
+    }
+  }
+
+  get(key: string): any | null {
+    const entry = this.cache.get(key);
+    
+    if (!entry) {
+      // Try to load from storage
+      if (this.config.persistToStorage) {
+        try {
+          const stored = localStorage.getItem(`cache_${key}`);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Date.now() - parsed.timestamp < this.config.maxAge) {
+              return parsed.data;
+            }
+            localStorage.removeItem(`cache_${key}`);
+          }
+        } catch (error) {
+          console.warn('Failed to load cache from localStorage:', error);
+        }
+      }
+      return null;
+    }
+
+    // Check if expired
+    if (Date.now() - entry.timestamp > this.config.maxAge) {
+      this.delete(key);
+      return null;
+    }
+
+    return entry.data;
+  }
+
+  delete(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (entry) {
+      this.totalSize -= entry.size;
+      this.cache.delete(key);
+      if (this.config.persistToStorage) {
+        localStorage.removeItem(`cache_${key}`);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.totalSize = 0;
+    if (this.config.persistToStorage) {
+      Object.keys(localStorage)
+        .filter(key => key.startsWith('cache_'))
+        .forEach(key => localStorage.removeItem(key));
+    }
+  }
+
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (now - entry.timestamp > this.config.maxAge) {
+        this.delete(key);
+      }
+    }
+  }
+
+  private estimateSize(data: any): number {
+    return JSON.stringify(data).length * 2; // Rough estimate
+  }
+
+  getStats() {
+    return {
+      size: this.cache.size,
+      totalMemory: this.totalSize,
+      hitRate: 0 // Would need tracking for accurate hit rate
+    };
+  }
+}
+
+// Global cache instance
+export const performanceCache = new MemoryCache({
+  maxAge: 5 * 60 * 1000, // 5 minutes
+  maxSize: 100,
+  enableCompression: false,
+  persistToStorage: true
+});
+
+// Lazy loading with advanced options
+export const createLazyComponent = <P extends object>(
+  importFunc: () => Promise<{ default: ComponentType<P> }>,
+  options: LazyComponentOptions = {}
+): ComponentType<P> => {
+  const {
+    fallback: CustomFallback,
+    errorFallback: CustomErrorFallback,
+    timeout = 10000,
+    preload = false,
+    chunkName
+  } = options;
+
+  const LazyComponent = lazy(() => {
+    const loadPromise = importFunc();
+
+    // Add timeout
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Component load timeout')), timeout);
+    });
+
+    return Promise.race([loadPromise, timeoutPromise]);
+  });
+
+  // Preload if requested
+  if (preload) {
+    importFunc().catch(() => {
+      // Silently fail preloading
+    });
+  }
+
+  const WrappedComponent: ComponentType<P> = (props) => {
+    const Fallback = CustomFallback || DefaultLoadingFallback;
+    const ErrorFallback = CustomErrorFallback || DefaultErrorFallback;
+
+    return (
+      <ErrorBoundary fallback={ErrorFallback}>
+        <Suspense fallback={<Fallback />}>
+          <LazyComponent {...props} />
+        </Suspense>
+      </ErrorBoundary>
+    );
+  };
+
+  // Add preload method
+  (WrappedComponent as any).preload = importFunc;
+
+  return WrappedComponent;
+};
+
+// Default loading fallback
+const DefaultLoadingFallback: React.FC = () => (
+  <Box display="flex" justifyContent="center" alignItems="center" minHeight={200}>
+    <CircularProgress />
+  </Box>
+);
+
+// Default error fallback
+const DefaultErrorFallback: React.FC<{ error: Error; retry: () => void }> = ({ error, retry }) => (
+  <Alert 
+    severity="error" 
+    action={
+      <button onClick={retry} style={{ marginLeft: 8, padding: '4px 8px' }}>
+        Retry
+      </button>
+    }
+  >
+    Failed to load component: {error.message}
+  </Alert>
+);
+
+// Error boundary component
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ComponentType<{ error: Error; retry: () => void }> },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    
+    // Report to performance monitoring
+    reportError(error, { 
+      componentStack: errorInfo.componentStack,
+      errorBoundary: true 
+    });
+  }
+
+  retry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      const FallbackComponent = this.props.fallback;
+      return <FallbackComponent error={this.state.error!} retry={this.retry} />;
+    }
+
+    return this.props.children;
+  }
+}
+
+// Performance monitoring
+class PerformanceMonitor {
+  private metrics: PerformanceMetrics[] = [];
+  private observers: PerformanceObserver[] = [];
+
+  constructor() {
+    this.initializeObservers();
+  }
+
+  private initializeObservers() {
+    // Long Task Observer
+    if ('PerformanceObserver' in window) {
+      try {
+        const longTaskObserver = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            console.warn('Long task detected:', entry);
+            this.reportLongTask(entry as PerformanceEntry);
+          }
+        });
+        longTaskObserver.observe({ entryTypes: ['longtask'] });
+        this.observers.push(longTaskObserver);
+      } catch (error) {
+        console.warn('Long task observer not supported:', error);
+      }
+
+      // Layout Shift Observer
+      try {
+        const layoutShiftObserver = new PerformanceObserver((list) => {
+          let clsScore = 0;
+          for (const entry of list.getEntries()) {
+            if (!(entry as any).hadRecentInput) {
+              clsScore += (entry as any).value;
+            }
+          }
+          if (clsScore > 0.1) {
+            console.warn('Cumulative Layout Shift detected:', clsScore);
+          }
+        });
+        layoutShiftObserver.observe({ entryTypes: ['layout-shift'] });
+        this.observers.push(layoutShiftObserver);
+      } catch (error) {
+        console.warn('Layout shift observer not supported:', error);
+      }
+
+      // Largest Contentful Paint
+      try {
+        const lcpObserver = new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          const lastEntry = entries[entries.length - 1];
+          console.log('LCP:', lastEntry.startTime);
+        });
+        lcpObserver.observe({ entryTypes: ['largest-contentful-paint'] });
+        this.observers.push(lcpObserver);
+      } catch (error) {
+        console.warn('LCP observer not supported:', error);
+      }
+    }
+  }
+
+  measureRenderTime<T>(componentName: string, renderFunc: () => T): T {
+    const startTime = performance.now();
+    const result = renderFunc();
+    const endTime = performance.now();
+    
+    console.log(`${componentName} render time:`, endTime - startTime, 'ms');
+    return result;
+  }
+
+  measureAsyncOperation<T>(operationName: string, asyncFunc: () => Promise<T>): Promise<T> {
+    const startTime = performance.now();
+    return asyncFunc().finally(() => {
+      const endTime = performance.now();
+      console.log(`${operationName} duration:`, endTime - startTime, 'ms');
+    });
+  }
+
+  getVitalMetrics(): any {
+    if ('performance' in window && 'getEntriesByType' in performance) {
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+      const paint = performance.getEntriesByType('paint');
+
+      return {
+        // Core Web Vitals
+        domContentLoaded: navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
+        loadComplete: navigation.loadEventEnd - navigation.loadEventStart,
+        firstPaint: paint.find(p => p.name === 'first-paint')?.startTime || 0,
+        firstContentfulPaint: paint.find(p => p.name === 'first-contentful-paint')?.startTime || 0,
+        // Memory usage (if available)
+        memoryUsage: (performance as any).memory ? {
+          used: (performance as any).memory.usedJSHeapSize,
+          total: (performance as any).memory.totalJSHeapSize,
+          limit: (performance as any).memory.jsHeapSizeLimit
+        } : null,
+        // Connection info
+        connection: (navigator as any).connection ? {
+          effectiveType: (navigator as any).connection.effectiveType,
+          downlink: (navigator as any).connection.downlink,
+          rtt: (navigator as any).connection.rtt
+        } : null
+      };
+    }
+    return null;
+  }
+
+  private reportLongTask(entry: PerformanceEntry) {
+    // Report to analytics or logging service
+    console.warn('Long task:', {
+      duration: entry.duration,
+      startTime: entry.startTime,
+      name: entry.name
+    });
+  }
+
+  startResourceTiming() {
+    if ('performance' in window) {
+      performance.mark('resource-timing-start');
+    }
+  }
+
+  endResourceTiming(resourceName: string) {
+    if ('performance' in window) {
+      performance.mark('resource-timing-end');
+      performance.measure(resourceName, 'resource-timing-start', 'resource-timing-end');
+      
+      const measures = performance.getEntriesByName(resourceName);
+      const latestMeasure = measures[measures.length - 1];
+      console.log(`Resource timing for ${resourceName}:`, latestMeasure.duration, 'ms');
+    }
+  }
+
+  cleanup() {
+    this.observers.forEach(observer => observer.disconnect());
+    this.observers = [];
+  }
+}
+
+export const performanceMonitor = new PerformanceMonitor();
+
+// Bundle optimization utilities
+export const preloadRoute = (routeImport: () => Promise<any>) => {
+  // Only preload on fast connections
+  const connection = (navigator as any).connection;
+  if (connection && (connection.effectiveType === '4g' || connection.effectiveType === '3g')) {
+    requestIdleCallback(() => {
+      routeImport().catch(() => {
+        // Silently fail preloading
+      });
+    });
+  }
+};
+
+export const preloadComponent = (componentImport: () => Promise<any>) => {
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => {
+      componentImport().catch(() => {
+        // Silently fail preloading
+      });
+    });
+  } else {
+    setTimeout(() => {
+      componentImport().catch(() => {
+        // Silently fail preloading
+      });
+    }, 100);
+  }
+};
+
+// Image optimization utilities
+export const createOptimizedImageSrc = (
+  src: string, 
+  width?: number, 
+  quality: number = 80,
+  format: 'webp' | 'avif' | 'jpeg' = 'webp'
+): string => {
+  // This would integrate with an image optimization service
+  const params = new URLSearchParams();
+  if (width) params.append('w', width.toString());
+  params.append('q', quality.toString());
+  params.append('f', format);
+  
+  return `${src}?${params.toString()}`;
+};
+
+// Debounced functions for performance
+export const createDebounced = <T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): T => {
+  let timeoutId: NodeJS.Timeout;
+  
+  return ((...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), delay);
+  }) as T;
+};
+
+export const createThrottled = <T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): T => {
+  let lastCall = 0;
+  
+  return ((...args: Parameters<T>) => {
+    const now = Date.now();
+    if (now - lastCall >= delay) {
+      lastCall = now;
+      return func(...args);
+    }
+  }) as T;
+};
+
+// Virtual scrolling utilities
+export const calculateVisibleRange = (
+  scrollTop: number,
+  containerHeight: number,
+  itemHeight: number,
+  totalItems: number,
+  overscan: number = 5
+) => {
+  const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
+  const endIndex = Math.min(
+    totalItems - 1,
+    Math.ceil((scrollTop + containerHeight) / itemHeight) + overscan
+  );
+  
+  return { startIndex, endIndex };
+};
+
+// Intersection Observer utilities
+export const createIntersectionObserver = (
+  callback: IntersectionObserverCallback,
+  options: IntersectionObserverInit = {}
+): IntersectionObserver => {
+  const defaultOptions: IntersectionObserverInit = {
+    root: null,
+    rootMargin: '50px',
+    threshold: 0.1,
+    ...options
+  };
+
+  return new IntersectionObserver(callback, defaultOptions);
+};
+
+// Error reporting
+export const reportError = (error: Error, context: any = {}) => {
+  console.error('Error reported:', error, context);
+  
+  // Report to external service (e.g., Sentry, LogRocket)
+  if (window.location.hostname !== 'localhost') {
+    // Would integrate with error reporting service
+    fetch('/api/errors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: error.message,
+        stack: error.stack,
+        context,
+        url: window.location.href,
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toISOString()
+      })
+    }).catch(() => {
+      // Silently fail error reporting
+    });
+  }
+};
+
+// Performance budget utilities
+export const checkPerformanceBudget = (budgets: { [key: string]: number }) => {
+  const metrics = performanceMonitor.getVitalMetrics();
+  const violations: string[] = [];
+
+  if (metrics) {
+    Object.entries(budgets).forEach(([metric, budget]) => {
+      const value = metrics[metric];
+      if (value && value > budget) {
+        violations.push(`${metric}: ${value}ms > ${budget}ms`);
+      }
+    });
+  }
+
+  if (violations.length > 0) {
+    console.warn('Performance budget violations:', violations);
+  }
+
+  return violations;
+};
+
+// Resource hints
+export const addResourceHints = (resources: Array<{ href: string; as?: string; type?: string }>) => {
+  resources.forEach(({ href, as, type }) => {
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.href = href;
+    if (as) link.setAttribute('as', as);
+    if (type) link.type = type;
+    document.head.appendChild(link);
+  });
+};
+
+// Web Workers utility
+export const createWebWorker = (workerScript: string): Promise<Worker> => {
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = new Worker(workerScript);
+      worker.onmessage = () => resolve(worker);
+      worker.onerror = reject;
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+// Service Worker utilities
+export const registerServiceWorker = async (swUrl: string = '/sw.js') => {
+  if ('serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.register(swUrl);
+      console.log('Service Worker registered:', registration);
+      return registration;
+    } catch (error) {
+      console.error('Service Worker registration failed:', error);
+      throw error;
+    }
+  }
+  throw new Error('Service Worker not supported');
+};
+
+// Cleanup utilities
+export const createCleanupManager = () => {
+  const cleanupFunctions: (() => void)[] = [];
+
+  return {
+    add: (cleanup: () => void) => {
+      cleanupFunctions.push(cleanup);
+    },
+    cleanup: () => {
+      cleanupFunctions.forEach(fn => {
+        try {
+          fn();
+        } catch (error) {
+          console.error('Cleanup function failed:', error);
+        }
+      });
+      cleanupFunctions.length = 0;
+    }
+  };
+};
+
+export default {
+  performanceCache,
+  createLazyComponent,
+  performanceMonitor,
+  preloadRoute,
+  preloadComponent,
+  createOptimizedImageSrc,
+  createDebounced,
+  createThrottled,
+  calculateVisibleRange,
+  createIntersectionObserver,
+  reportError,
+  checkPerformanceBudget,
+  addResourceHints,
+  createWebWorker,
+  registerServiceWorker,
+  createCleanupManager
+};

@@ -79,7 +79,7 @@ const QuickStartDemo: React.FC = () => {
   };
 
   const handleStartRealCalculation = () => {
-    navigate('/batch');
+    navigate('/batch?browse=1');
   };
 
   const renderStepContent = () => {
@@ -311,7 +311,7 @@ const QuickStartDemo: React.FC = () => {
                 </button>
                 <span className="text-gray-400">•</span>
                 <button
-                  onClick={() => navigate('/batch')}
+                  onClick={() => navigate('/batch?browse=1')}
                   className="text-sm text-green-700 hover:text-green-900 underline ml-4"
                 >
                   Start with Your Data

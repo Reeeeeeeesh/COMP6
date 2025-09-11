@@ -6,7 +6,8 @@ export default defineConfig({
   fullyParallel: true,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    // Match the Vite dev server port
+    baseURL: 'http://localhost:3000',
     headless: true,
   },
   projects: [
