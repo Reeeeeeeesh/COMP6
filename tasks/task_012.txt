@@ -1,0 +1,210 @@
+# Task ID: 12
+# Title: Implement Scenario Playground Module - Parameter Adjustment and Impact Assessment
+# Status: done
+# Dependencies: 11
+# Priority: medium
+# Description: Develop the interface for adjusting global calculation parameters in the Scenario Playground and assessing their impact on the dataset.
+# Details:
+1. Create frontend components:
+   - ScenarioParameterPanel.tsx: Interface for adjusting global parameters
+   - ScenarioResultsPanel.tsx: Display of scenario calculation results
+2. Implement parameter adjustment for:
+   - RAF sensitivity and clamp values
+   - MRT Cap %
+   - Investment/Qualitative weights
+   - Parameters for performance-to-multiplier curves
+3. Create real-time recalculation of bonuses for the entire dataset
+4. Implement summary statistics updates
+
+Example scenario parameter panel component:
+```typescript
+const ScenarioParameterPanel: React.FC<{
+  initialParameters: ScenarioParameters;
+  onChange: (parameters: ScenarioParameters) => void;
+}> = ({ initialParameters, onChange }) => {
+  const [parameters, setParameters] = useState<ScenarioParameters>(initialParameters);
+  
+  // Update parent component when parameters change
+  useEffect(() => {
+    onChange(parameters);
+  }, [parameters, onChange]);
+  
+  const handleChange = (field: keyof ScenarioParameters, value: number | boolean) => {
+    setParameters(prev => {
+      const updated = {
+        ...prev,
+        [field]: value
+      };
+      
+      // If investment weight changes, adjust qualitative weight to maintain sum of 1
+      if (field === 'investmentWeight') {
+        updated.qualitativeWeight = 1 - Number(value);
+      } else if (field === 'qualitativeWeight') {
+        updated.investmentWeight = 1 - Number(value);
+      }
+      
+      return updated;
+    });
+  };
+  
+  return (
+    <div className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Scenario Parameters</h2>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Performance Weights Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Performance Weights</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Investment Weight</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={parameters.investmentWeight}
+              onChange={(e) => handleChange('investmentWeight', Number(e.target.value))}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs">
+              <span>0%</span>
+              <span>{(parameters.investmentWeight * 100).toFixed(0)}%</span>
+              <span>100%</span>
+            </div>
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Qualitative Weight</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={parameters.qualitativeWeight}
+              onChange={(e) => handleChange('qualitativeWeight', Number(e.target.value))}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs">
+              <span>0%</span>
+              <span>{(parameters.qualitativeWeight * 100).toFixed(0)}%</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* RAF Settings Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">RAF Settings</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">RAF Sensitivity Factor</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={parameters.rafSensitivity}
+              onChange={(e) => handleChange('rafSensitivity', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">RAF Lower Clamp</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={parameters.rafLowerClamp}
+              onChange={(e) => handleChange('rafLowerClamp', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">RAF Upper Clamp</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={parameters.rafUpperClamp}
+              onChange={(e) => handleChange('rafUpperClamp', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+        </div>
+        
+        {/* Cap Settings Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Cap Settings</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">MRT Cap %</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={parameters.mrtCapPct}
+              onChange={(e) => handleChange('mrtCapPct', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for parameter adjustment components
+2. Integration tests for real-time recalculation
+3. Test parameter validation and constraints
+4. Verify calculation accuracy for the entire dataset
+5. Test performance with large datasets
+6. Validate summary statistics updates
+
+# Subtasks:
+## 1. Fix Parameter Panel Undefined Value Errors [done]
+### Dependencies: None
+### Description: Fix the "Cannot read properties of undefined (reading 'toFixed')" errors in ScenarioParameterPanel and IndividualCalculator components
+### Details:
+- Fix RAF value error at ScenarioParameterPanel.tsx line 173
+- Fix IndividualCalculator.tsx line 518 error
+- Ensure proper default parameter initialization
+- Handle undefined parameter values gracefully
+
+## 2. Implement Navigation Header for Scenario Playground [done]
+### Dependencies: None
+### Description: Add NavigationHeader component to scenario playground pages to allow users to navigate back to other modules
+### Details:
+- Add NavigationHeader to scenario pages
+- Ensure consistent navigation across all modules
+- Fix issue where users get stuck after batch upload completion
+
+## 3. Fix Scenario Creation API Endpoint [done]
+### Dependencies: None
+### Description: Fix the 422 Unprocessable Entity error when creating scenarios by updating frontend to send FormData instead of JSON
+### Details:
+- Convert scenario creation request from JSON to FormData format
+- Update frontend to match backend endpoint expectations
+- Fix parameter serialization for scenario creation
+
+## 4. Implement Real-time Parameter Validation [done]
+### Dependencies: None
+### Description: Add validation for parameter inputs to prevent invalid values and provide user feedback
+### Details:
+- Add range validation for all parameter inputs
+- Implement real-time validation feedback
+- Ensure parameter constraints are enforced (e.g., weights sum to 1)
+- Add error handling for invalid parameter combinations
+
+## 5. Implement Real-time Scenario Recalculation [done]
+### Dependencies: 12.1
+### Description: Develop the functionality to recalculate all bonus values when parameters change in the scenario playground
+### Details:
+- Connect parameter changes to calculation engine
+- Implement efficient batch recalculation for large datasets
+- Add loading states during recalculation
+- Optimize performance for real-time updates
+

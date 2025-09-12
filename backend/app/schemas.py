@@ -26,6 +26,11 @@ class BatchParameters(BaseModel):
     investmentScoreMultiplier: float
     qualScoreMultiplier: float
     raf: float
+    # When true, use row-level values from the uploaded CSV if present
+    # for these fields: target_bonus_pct, investment_weight, qualitative_weight,
+    # investment_score_multiplier, qual_score_multiplier, mrt_cap_pct.
+    # RAF still follows useDirectRaf behavior.
+    useRowValuesWhenPresent: bool = False
     rafSensitivity: Optional[float] = None
     rafLowerClamp: Optional[float] = None
     rafUpperClamp: Optional[float] = None

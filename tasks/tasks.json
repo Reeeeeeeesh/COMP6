@@ -1,0 +1,656 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Setup Project Structure and Environment",
+        "description": "Initialize the project repository with the required frontend and backend structure, including configuration for React/TypeScript frontend and Python/FastAPI backend.",
+        "details": "1. Create a monorepo structure with frontend and backend directories\n2. Frontend setup:\n   - Initialize with Vite, React 18, and TypeScript 5\n   - Configure Tailwind CSS\n   - Set up ESLint and Prettier\n   - Configure basic routing structure\n   - Initialize React Query for API communication\n3. Backend setup:\n   - Set up Python 3.11 environment with FastAPI\n   - Configure Pydantic for data validation\n   - Set up SQLAlchemy ORM with PostgreSQL connection\n   - Initialize Alembic for database migrations\n   - Configure CORS for frontend communication\n4. Create Docker configuration for development and production environments\n5. Set up CI/CD pipeline configuration\n6. Configure logging and observability tools as specified in NFR7",
+        "testStrategy": "1. Verify that the frontend development server starts without errors\n2. Verify that the backend server starts and connects to the database\n3. Confirm that frontend can make API calls to the backend\n4. Validate Docker containers build and run correctly\n5. Verify that logging is properly configured and capturing events",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Implement Core Data Models and Database Schema",
+        "description": "Design and implement the database schema and data models for the application, including session management, batch uploads, employee data, and scenario management.",
+        "details": "1. Define SQLAlchemy models for:\n   - Session (sessions table)\n   - BatchUpload (batch_uploads table)\n   - EmployeeData (employee_data table)\n   - BatchScenario (batch_scenarios table)\n   - BatchCalculationResult (batch_calculation_results table)\n   - EmployeeCalculationResult (employee_calculation_results table)\n   - ImportTemplate (import_templates table)\n   - ScenarioAuditLog (scenario_audit_log table)\n2. Create Pydantic schemas for request/response validation\n3. Implement database access layer (DAL) classes for each model\n4. Set up Alembic migrations for initial schema creation\n5. Implement session management logic with anonymous sessions\n6. Configure data retention policies for temporary batch data\n\nExample Session model:\n```python\nclass Session(Base):\n    __tablename__ = \"sessions\"\n    \n    id = Column(String, primary_key=True, index=True)\n    expires_at = Column(DateTime, nullable=False)\n    created_at = Column(DateTime, default=datetime.utcnow)\n    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)\n```",
+        "testStrategy": "1. Unit tests for each model and DAL class\n2. Integration tests for database operations\n3. Test session creation, expiration, and cleanup\n4. Verify data retention policies work as expected\n5. Test database migrations apply correctly\n6. Validate foreign key constraints and relationships",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Implement Core Calculation Engine",
+        "description": "Develop the core calculation engine that will be used across all modules (batch processing, individual calculator, and scenario playground) to ensure consistent bonus calculations.",
+        "details": "1. Implement the core bonus formula: FinalBonus = BaseSalary × TargetBonusPct × (InvestmentWeight × InvestmentScoreMultiplier + QualitativeWeight × QualScoreMultiplier) × RAF\n2. Create pure functions for all intermediate calculations:\n   - Target bonus calculation\n   - Weighted performance scores\n   - RAF calculation with sensitivity and clamping\n   - Cap application logic (3x Base Salary and MRT Cap)\n3. Implement both backend (Python) and frontend (TypeScript) versions of the calculation engine\n4. Ensure calculation logic is identical between frontend and backend\n5. Create utility functions for validation and error handling\n\nExample calculation function:\n```python\ndef calculate_final_bonus(base_salary: float, target_bonus_pct: float, \n                         investment_weight: float, investment_score_multiplier: float,\n                         qualitative_weight: float, qual_score_multiplier: float,\n                         raf: float, is_mrt: bool = False, mrt_cap_pct: float = None) -> dict:\n    \"\"\"Calculate the final bonus with all intermediate steps.\"\"\"\n    # Calculate target bonus\n    target_bonus = base_salary * target_bonus_pct\n    \n    # Calculate weighted performance\n    weighted_performance = (investment_weight * investment_score_multiplier + \n                           qualitative_weight * qual_score_multiplier)\n    \n    # Calculate pre-RAF bonus\n    pre_raf_bonus = target_bonus * weighted_performance\n    \n    # Apply RAF\n    initial_bonus = pre_raf_bonus * raf\n    \n    # Apply caps\n    base_salary_cap = base_salary * 3\n    mrt_cap = base_salary * mrt_cap_pct if is_mrt and mrt_cap_pct else float('inf')\n    \n    # Apply the lower of the caps if either is breached\n    final_bonus = min(initial_bonus, base_salary_cap, mrt_cap)\n    \n    return {\n        \"target_bonus\": target_bonus,\n        \"weighted_performance\": weighted_performance,\n        \"pre_raf_bonus\": pre_raf_bonus,\n        \"initial_bonus\": initial_bonus,\n        \"base_salary_cap\": base_salary_cap,\n        \"mrt_cap\": mrt_cap if is_mrt else None,\n        \"final_bonus\": final_bonus,\n        \"cap_applied\": \"3x_base\" if final_bonus == base_salary_cap and final_bonus < initial_bonus else\n                      \"mrt\" if final_bonus == mrt_cap and final_bonus < initial_bonus else None\n    }\n```",
+        "testStrategy": "1. Unit tests for all calculation functions using the truth table cases from Section 11\n2. Edge case tests using scenarios from Section 13\n3. Property-based testing to verify calculation invariants\n4. Cross-implementation tests to ensure frontend and backend calculations match\n5. Performance benchmarks for calculation speed\n6. Validation of RAF clamping behavior",
+        "priority": "high",
+        "dependencies": [
+          2
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Core Bonus Formula",
+            "description": "Create the main function to calculate the final bonus using the provided formula",
+            "dependencies": [],
+            "details": "Implement the calculate_final_bonus function as shown in the example, ensuring all components of the formula are correctly applied: FinalBonus = BaseSalary × TargetBonusPct × (InvestmentWeight × InvestmentScoreMultiplier + QualitativeWeight × QualScoreMultiplier) × RAF",
+            "status": "done",
+            "testStrategy": "Create unit tests with various input combinations to verify the correctness of the final bonus calculation"
+          },
+          {
+            "id": 2,
+            "title": "Develop Intermediate Calculation Functions",
+            "description": "Create pure functions for all intermediate calculations in the bonus formula",
+            "dependencies": [
+              1
+            ],
+            "details": "Implement separate functions for target bonus calculation, weighted performance scores, RAF calculation with sensitivity and clamping, and cap application logic (3x Base Salary and MRT Cap)",
+            "status": "done",
+            "testStrategy": "Develop unit tests for each intermediate function to ensure accurate calculations"
+          },
+          {
+            "id": 3,
+            "title": "Implement Backend Version",
+            "description": "Create a Python version of the calculation engine for server-side use",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Translate the core bonus formula and intermediate calculations into Python, ensuring compatibility with the backend architecture and data models",
+            "status": "done",
+            "testStrategy": "Implement integration tests to verify the backend calculation engine works correctly within the server environment"
+          },
+          {
+            "id": 4,
+            "title": "Implement Frontend Version",
+            "description": "Develop a TypeScript version of the calculation engine for client-side use",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Port the Python implementation to TypeScript, maintaining identical calculation logic and adapting to frontend data structures and type system",
+            "status": "done",
+            "testStrategy": "Create browser-based tests to validate the frontend calculation engine's accuracy and performance"
+          },
+          {
+            "id": 5,
+            "title": "Create Validation and Error Handling Utilities",
+            "description": "Implement utility functions for input validation and error handling",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "Develop functions to validate input data, handle edge cases, and provide meaningful error messages for both backend and frontend implementations",
+            "status": "done",
+            "testStrategy": "Design test cases with invalid inputs and edge cases to ensure robust error handling and validation"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Implement Batch Processing Module - File Upload and Validation",
+        "description": "Develop the file upload component of the Batch Processing Module, including CSV parsing, initial validation, and column preview functionality.",
+        "details": "1. Create frontend components:\n   - BatchUploadContainer.tsx: Main container for the batch upload process\n   - FileUpload.tsx: Component for file selection and upload\n   - FilePreview.tsx: Display initial file preview and validation results\n2. Implement backend endpoints:\n   - POST /api/v1/batch/file: Upload CSV file\n   - GET /api/v1/batch/uploads/{upload_id}/columns: Get column info\n   - GET /api/v1/batch/uploads/template/{file_format}: Download template\n3. Implement file processing service:\n   - Parse CSV files\n   - Validate file structure and format\n   - Extract column headers and sample data\n   - Store raw file content in the database\n4. Add progress indicators for file upload\n5. Implement error handling for invalid files\n\nExample frontend component:\n```typescript\nconst FileUpload: React.FC = () => {\n  const [file, setFile] = useState<File | null>(null);\n  const [uploading, setUploading] = useState(false);\n  const [error, setError] = useState<string | null>(null);\n  \n  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {\n    if (e.target.files && e.target.files.length > 0) {\n      setFile(e.target.files[0]);\n      setError(null);\n    }\n  };\n  \n  const handleUpload = async () => {\n    if (!file) return;\n    \n    setUploading(true);\n    setError(null);\n    \n    const formData = new FormData();\n    formData.append('file', file);\n    \n    try {\n      const response = await fetch('/api/v1/batch/file', {\n        method: 'POST',\n        body: formData,\n      });\n      \n      if (!response.ok) {\n        throw new Error('Upload failed');\n      }\n      \n      const data = await response.json();\n      // Handle successful upload\n    } catch (err) {\n      setError(err.message || 'An error occurred during upload');\n    } finally {\n      setUploading(false);\n    }\n  };\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Upload Employee Data</h2>\n      <input \n        type=\"file\" \n        accept=\".csv\" \n        onChange={handleFileChange} \n        className=\"mb-4\"\n      />\n      <button \n        onClick={handleUpload} \n        disabled={!file || uploading}\n        className=\"px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-300\"\n      >\n        {uploading ? 'Uploading...' : 'Upload'}\n      </button>\n      {error && <p className=\"text-red-500 mt-2\">{error}</p>}\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for file upload components\n2. Integration tests for file upload API endpoints\n3. Test with various CSV formats and sizes\n4. Validate error handling for malformed or invalid files\n5. Test file size limits and upload progress indicators\n6. Verify that column headers and sample data are correctly extracted",
+        "priority": "high",
+        "dependencies": [
+          2,
+          3
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement FileUpload.tsx Component",
+            "description": "Create a React component for file selection and upload functionality",
+            "dependencies": [],
+            "details": "Develop a FileUpload.tsx component that allows users to select a CSV file and initiate the upload process. Include file type validation, error handling, and upload progress indication.",
+            "status": "done",
+            "testStrategy": "Write unit tests to verify file selection, upload initiation, and error handling scenarios."
+          },
+          {
+            "id": 2,
+            "title": "Create Backend File Upload Endpoint",
+            "description": "Implement the POST /api/v1/batch/file endpoint for file upload",
+            "dependencies": [],
+            "details": "Develop a backend endpoint that handles file upload requests, validates the file format, and stores the raw file content in the database. Implement proper error handling and response formatting.",
+            "status": "done",
+            "testStrategy": "Create integration tests to verify successful file uploads, rejection of invalid file types, and proper error responses."
+          },
+          {
+            "id": 3,
+            "title": "Implement CSV Parsing and Validation Service",
+            "description": "Create a service to parse CSV files, validate structure, and extract column information",
+            "dependencies": [
+              2
+            ],
+            "details": "Develop a service that parses uploaded CSV files, validates the file structure and format, extracts column headers and sample data. Implement error handling for invalid files and data inconsistencies.",
+            "status": "done",
+            "testStrategy": "Write unit tests for CSV parsing, structure validation, and column extraction with various input scenarios."
+          },
+          {
+            "id": 4,
+            "title": "Create FilePreview.tsx Component",
+            "description": "Develop a component to display initial file preview and validation results",
+            "dependencies": [
+              1,
+              3
+            ],
+            "details": "Create a FilePreview.tsx component that displays the extracted column headers, sample data, and any validation results or errors from the CSV parsing process. Implement a user-friendly interface for reviewing the uploaded file contents.",
+            "status": "done",
+            "testStrategy": "Develop unit tests to ensure proper rendering of file preview data and error messages."
+          },
+          {
+            "id": 5,
+            "title": "Implement Column Info Retrieval Endpoint",
+            "description": "Create the GET /api/v1/batch/uploads/{upload_id}/columns endpoint",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Develop a backend endpoint that retrieves and returns column information for a specific upload, including headers and sample data. Implement proper error handling for invalid upload IDs or processing errors.",
+            "status": "done",
+            "testStrategy": "Write integration tests to verify correct column information retrieval and error handling for various scenarios."
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Implement Batch Processing Module - Column Mapping and Template Management",
+        "description": "Develop the column mapping interface and template management functionality for the Batch Processing Module.",
+        "details": "1. Create frontend components:\n   - ColumnMapper.tsx: Interface for mapping CSV columns to system fields\n   - TemplateManager.tsx: Component for saving and loading mapping templates\n2. Implement backend endpoints:\n   - POST /api/v1/batch/uploads/{upload_id}/map_and_process: Submit column mappings\n   - POST /api/v1/batch/templates: Create a new template\n   - GET /api/v1/batch/templates: List templates\n   - GET /api/v1/batch/templates/{template_id}: Get a specific template\n   - PUT /api/v1/batch/templates/{template_id}: Update a template\n   - DELETE /api/v1/batch/templates/{template_id}: Delete a template\n   - POST /api/v1/batch/templates/{template_id}/apply: Apply template to an upload\n3. Implement column auto-mapping algorithm based on column name similarity\n4. Create UI for specifying default values for unmapped required fields\n5. Implement template storage and retrieval logic\n\nExample column mapping component:\n```typescript\nconst ColumnMapper: React.FC<{\n  sourceColumns: string[];\n  targetFields: {name: string; required: boolean}[];\n  onSubmit: (mappings: Record<string, string>, defaults: Record<string, any>) => void;\n}> = ({ sourceColumns, targetFields, onSubmit }) => {\n  const [mappings, setMappings] = useState<Record<string, string>>({});\n  const [defaults, setDefaults] = useState<Record<string, any>>({});\n  \n  // Auto-mapping on component mount\n  useEffect(() => {\n    const suggestedMappings = {};\n    \n    targetFields.forEach(target => {\n      // Find best match in source columns\n      const bestMatch = sourceColumns.find(src => \n        src.toLowerCase().includes(target.name.toLowerCase()) ||\n        target.name.toLowerCase().includes(src.toLowerCase())\n      );\n      \n      if (bestMatch) {\n        suggestedMappings[target.name] = bestMatch;\n      }\n    });\n    \n    setMappings(suggestedMappings);\n  }, [sourceColumns, targetFields]);\n  \n  const handleMappingChange = (targetField: string, sourceColumn: string) => {\n    setMappings(prev => ({\n      ...prev,\n      [targetField]: sourceColumn\n    }));\n  };\n  \n  const handleDefaultChange = (targetField: string, value: any) => {\n    setDefaults(prev => ({\n      ...prev,\n      [targetField]: value\n    }));\n  };\n  \n  const handleSubmit = () => {\n    onSubmit(mappings, defaults);\n  };\n  \n  return (\n    <div className=\"p-4\">\n      <h2 className=\"text-xl font-bold mb-4\">Map Columns</h2>\n      \n      {targetFields.map(field => (\n        <div key={field.name} className=\"mb-4\">\n          <label className=\"block mb-2\">\n            {field.name} {field.required && <span className=\"text-red-500\">*</span>}\n          </label>\n          \n          <select\n            value={mappings[field.name] || ''}\n            onChange={(e) => handleMappingChange(field.name, e.target.value)}\n            className=\"p-2 border rounded w-full mb-2\"\n          >\n            <option value=\"\">-- Select source column --</option>\n            {sourceColumns.map(col => (\n              <option key={col} value={col}>{col}</option>\n            ))}\n          </select>\n          \n          {!mappings[field.name] && field.required && (\n            <div>\n              <label className=\"block mb-1 text-sm\">Default value:</label>\n              <input\n                type=\"text\"\n                value={defaults[field.name] || ''}\n                onChange={(e) => handleDefaultChange(field.name, e.target.value)}\n                className=\"p-2 border rounded w-full\"\n                required\n              />\n            </div>\n          )}\n        </div>\n      ))}\n      \n      <button \n        onClick={handleSubmit}\n        className=\"px-4 py-2 bg-blue-500 text-white rounded\"\n      >\n        Submit Mapping\n      </button>\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for column mapping components\n2. Integration tests for template management API endpoints\n3. Test auto-mapping algorithm with various column naming conventions\n4. Validate template saving and loading functionality\n5. Test handling of required vs. optional fields\n6. Verify default value application for unmapped fields",
+        "priority": "medium",
+        "dependencies": [
+          4
+        ],
+        "status": "deferred",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Develop Frontend Column Mapping Interface",
+            "description": "Create a drag-and-drop interface for users to map source columns to target fields with visual feedback and validation.",
+            "dependencies": [],
+            "details": "Acceptance Criteria:\n- Interactive drag-and-drop functionality for mapping columns\n- Visual indicators for mapped and unmapped fields\n- Validation to prevent invalid mappings\n- Preview of mapping results\n- Responsive design for different screen sizes\n\nTechnical Considerations:\n- Use React with a drag-and-drop library (e.g., react-dnd)\n- Implement state management for mapping configuration\n- Create reusable components for source/target fields\n- Add error handling for edge cases\n- Ensure accessibility compliance",
+            "status": "in-progress"
+          },
+          {
+            "id": 2,
+            "title": "Build Template Management UI Components",
+            "description": "Develop UI components for saving, loading, and managing mapping templates with CRUD operations.",
+            "dependencies": [
+              1
+            ],
+            "details": "Acceptance Criteria:\n- Template creation form with name and description fields\n- Template listing with search and filter capabilities\n- Edit and delete functionality for existing templates\n- Template sharing options between users\n- Version history for templates\n\nTechnical Considerations:\n- Create modular components for template operations\n- Implement form validation for template metadata\n- Design responsive layouts for template management screens\n- Add confirmation dialogs for destructive actions\n- Include loading states and error handling",
+            "status": "pending"
+          },
+          {
+            "id": 3,
+            "title": "Implement Backend API Endpoints for Column Mapping",
+            "description": "Create RESTful API endpoints to handle column mapping operations including validation and persistence.",
+            "dependencies": [],
+            "details": "Acceptance Criteria:\n- API endpoint to validate mapping configurations\n- Endpoint to save mapping configurations\n- Endpoint to retrieve existing mappings\n- Proper error handling and validation\n- Performance optimization for large datasets\n\nTechnical Considerations:\n- Design RESTful API following best practices\n- Implement input validation and sanitization\n- Create database schema for mapping storage\n- Add authentication and authorization checks\n- Document API endpoints with OpenAPI/Swagger",
+            "status": "pending"
+          },
+          {
+            "id": 4,
+            "title": "Develop Backend API Endpoints for Template Management",
+            "description": "Create API endpoints for CRUD operations on mapping templates with user permissions and sharing capabilities.",
+            "dependencies": [
+              3
+            ],
+            "details": "Acceptance Criteria:\n- CRUD endpoints for template management\n- User permission controls for templates\n- Template sharing and access control\n- Version control for templates\n- Bulk operations for template management\n\nTechnical Considerations:\n- Design database schema for templates with versioning\n- Implement permission model for template access\n- Create efficient queries for template retrieval\n- Add transaction support for template operations\n- Implement caching for frequently accessed templates",
+            "status": "pending"
+          },
+          {
+            "id": 5,
+            "title": "Implement Auto-Mapping Algorithm",
+            "description": "Develop an intelligent algorithm to automatically suggest column mappings based on column names, data types, and historical mappings.",
+            "dependencies": [
+              1,
+              3
+            ],
+            "details": "Acceptance Criteria:\n- Algorithm to suggest mappings based on column names similarity\n- Consider data types for mapping suggestions\n- Learn from historical mapping patterns\n- Confidence score for suggested mappings\n- User interface to accept/reject suggestions\n\nTechnical Considerations:\n- Implement string similarity algorithms (e.g., Levenshtein distance)\n- Create machine learning model for pattern recognition\n- Design efficient algorithm for large datasets\n- Add feedback loop to improve suggestions over time\n- Implement fallback strategies when confidence is low",
+            "status": "pending"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Implement Batch Processing Module - Global Parameter Configuration",
+        "description": "Develop the interface for configuring global calculation parameters to be applied to an entire batch.",
+        "details": "1. Create frontend components:\n   - BatchParameterConfig.tsx: Form for configuring global calculation parameters\n2. Implement parameter configuration for:\n   - Standard Target Bonus %\n   - Investment & Qualitative Weights\n   - Parameters for Investment Score Multiplier curve\n   - Parameters for Qualitative Score Multiplier curve\n   - RAF calculation parameters or global RAF value\n   - MRT Cap Percentage and other policy settings\n3. Add validation for parameter values (e.g., weights must sum to 100%)\n4. Implement parameter storage in the batch upload record\n5. Create UI for parameter presets or quick configurations\n\nExample parameter configuration component:\n```typescript\nconst BatchParameterConfig: React.FC<{\n  onSubmit: (parameters: BatchParameters) => void;\n  initialValues?: BatchParameters;\n}> = ({ onSubmit, initialValues }) => {\n  const [parameters, setParameters] = useState<BatchParameters>(initialValues || {\n    targetBonusPct: 0.4, // 40%\n    investmentWeight: 0.6, // 60%\n    qualitativeWeight: 0.4, // 40%\n    rafSensitivity: 0.2,\n    rafLowerClamp: 0,\n    rafUpperClamp: 1.2,\n    mrtCapPct: 1.0, // 100% of base salary\n    useDirectRaf: true, // Use RAF from CSV if available\n  });\n  \n  const handleChange = (field: keyof BatchParameters, value: number | boolean) => {\n    setParameters(prev => ({\n      ...prev,\n      [field]: value\n    }));\n    \n    // If investment weight changes, adjust qualitative weight to maintain sum of 1\n    if (field === 'investmentWeight') {\n      setParameters(prev => ({\n        ...prev,\n        qualitativeWeight: 1 - Number(value)\n      }));\n    } else if (field === 'qualitativeWeight') {\n      setParameters(prev => ({\n        ...prev,\n        investmentWeight: 1 - Number(value)\n      }));\n    }\n  };\n  \n  const handleSubmit = (e: React.FormEvent) => {\n    e.preventDefault();\n    onSubmit(parameters);\n  };\n  \n  return (\n    <form onSubmit={handleSubmit} className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Global Calculation Parameters</h2>\n      \n      <div className=\"mb-4\">\n        <label className=\"block mb-2\">Default Target Bonus %</label>\n        <input\n          type=\"number\"\n          min=\"0\"\n          max=\"2\"\n          step=\"0.01\"\n          value={parameters.targetBonusPct}\n          onChange={(e) => handleChange('targetBonusPct', Number(e.target.value))}\n          className=\"p-2 border rounded w-full\"\n        />\n      </div>\n      \n      <div className=\"mb-4\">\n        <label className=\"block mb-2\">Investment Weight</label>\n        <input\n          type=\"range\"\n          min=\"0\"\n          max=\"1\"\n          step=\"0.01\"\n          value={parameters.investmentWeight}\n          onChange={(e) => handleChange('investmentWeight', Number(e.target.value))}\n          className=\"w-full\"\n        />\n        <div className=\"flex justify-between\">\n          <span>0%</span>\n          <span>{(parameters.investmentWeight * 100).toFixed(0)}%</span>\n          <span>100%</span>\n        </div>\n      </div>\n      \n      <div className=\"mb-4\">\n        <label className=\"block mb-2\">Qualitative Weight</label>\n        <input\n          type=\"range\"\n          min=\"0\"\n          max=\"1\"\n          step=\"0.01\"\n          value={parameters.qualitativeWeight}\n          onChange={(e) => handleChange('qualitativeWeight', Number(e.target.value))}\n          className=\"w-full\"\n        />\n        <div className=\"flex justify-between\">\n          <span>0%</span>\n          <span>{(parameters.qualitativeWeight * 100).toFixed(0)}%</span>\n          <span>100%</span>\n        </div>\n      </div>\n      \n      {/* Additional parameter inputs... */}\n      \n      <button \n        type=\"submit\"\n        className=\"px-4 py-2 bg-blue-500 text-white rounded\"\n      >\n        Apply Parameters\n      </button>\n    </form>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for parameter configuration components\n2. Validation tests for parameter constraints (e.g., weights sum to 100%)\n3. Test parameter storage and retrieval\n4. Verify parameter application to batch calculations\n5. Test parameter presets and quick configurations\n6. Validate handling of parameter overrides from CSV data",
+        "priority": "medium",
+        "dependencies": [
+          5
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Develop Parameter Configuration UI Components",
+            "description": "Create the user interface components for configuring global parameters with real-time validation feedback.",
+            "dependencies": [],
+            "details": "Technical requirements: 1) Build form components for numeric inputs, dropdowns, and toggles; 2) Implement client-side validation for parameter constraints (e.g., weights must sum to 100%, values within specified ranges); 3) Create error/warning indicators with descriptive messages; 4) Design responsive layout that works across device sizes. Validation rules: Implement type checking, range validation, interdependent field validation (e.g., related parameters), and required field validation. Integration points: UI components should emit events when values change to trigger validation and preview calculations.",
+            "status": "done"
+          },
+          {
+            "id": 2,
+            "title": "Implement Parameter Storage in Batch Records",
+            "description": "Develop the data model and storage mechanisms for persisting parameter configurations within batch records.",
+            "dependencies": [
+              1
+            ],
+            "details": "Technical requirements: 1) Design schema for parameter storage that includes parameter values, metadata, and validation state; 2) Implement serialization/deserialization of parameter configurations; 3) Create API endpoints for saving and retrieving parameter configurations; 4) Ensure backward compatibility with existing batch records. Validation rules: Server-side validation to ensure data integrity, parameter value constraints, and schema validation. Integration points: Database layer, batch record service, audit logging system for tracking parameter changes.",
+            "status": "done"
+          },
+          {
+            "id": 3,
+            "title": "Develop Parameter Preset Functionality",
+            "description": "Create the ability to save, load, and manage parameter configuration presets.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Technical requirements: 1) Design UI for saving current parameters as a named preset; 2) Implement preset selection dropdown with preview capability; 3) Create preset management interface (rename, delete, set default); 4) Develop import/export functionality for presets. Validation rules: Validate preset names for uniqueness and format, ensure complete parameter sets in presets, verify preset compatibility with current system configuration. Integration points: User preferences service, parameter storage system, permission system for shared presets.",
+            "status": "done"
+          },
+          {
+            "id": 4,
+            "title": "Integrate with Calculation Engine",
+            "description": "Connect the parameter configuration system with the calculation engine to apply parameters to data processing.",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Technical requirements: 1) Develop parameter transformation layer to convert UI parameters to calculation engine format; 2) Implement parameter injection into calculation pipeline; 3) Create preview calculation functionality using current parameters; 4) Add parameter validation specific to calculation requirements. Validation rules: Validate parameters against calculation engine constraints, ensure all required parameters are provided, check for parameter combinations that may cause performance issues. Integration points: Calculation engine API, batch processing workflow, results preview system, error handling and reporting system.",
+            "status": "done"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Implement Batch Processing Module - Calculation and Results Display",
+        "description": "Develop the batch calculation engine and results display interface for the Batch Processing Module.",
+        "details": "1. Create frontend components:\n   - BatchResultsDisplay.tsx: Tabular display of batch calculation results\n   - BatchSummary.tsx: Summary statistics for the batch\n2. Implement backend endpoints:\n   - POST /api/v1/batch/uploads/{upload_id}/calculate_and_retrieve_results: Trigger calculation\n   - GET /api/v1/batch/uploads/{upload_id}/employees: Get processed employee data\n3. Implement batch calculation service:\n   - Process all valid employee records\n   - Apply global parameters and individual overrides\n   - Calculate bonuses using the core calculation engine\n   - Store results in the database\n4. Add sorting, filtering, and search functionality to the results table\n5. Implement export to CSV/Excel functionality\n6. Add progress tracking for large batch calculations\n\nExample batch calculation service:\n```python\nclass BatchCalculationService:\n    def __init__(self, db: Session):\n        self.db = db\n        self.calculation_engine = CalculationEngine()\n    \n    async def calculate_batch(self, batch_upload_id: int, global_parameters: dict) -> BatchCalculationResult:\n        \"\"\"Calculate bonuses for all employees in a batch.\"\"\"\n        # Get all employee data for this batch\n        employee_data = await EmployeeDataDAL(self.db).get_by_batch_upload_id(batch_upload_id)\n        \n        # Create a new batch scenario for this calculation\n        scenario = await BatchScenarioDAL(self.db).create(\n            session_id=employee_data[0].batch_upload.session_id if employee_data else None,\n            name=f\"Batch {batch_upload_id} - {datetime.now().strftime('%Y-%m-%d %H:%M')}\",\n            global_parameters=global_parameters,\n            is_saved=False\n        )\n        \n        # Create a new batch calculation result\n        batch_result = await BatchCalculationResultDAL(self.db).create(\n            scenario_id=scenario.id,\n            total_employees=len(employee_data),\n            total_bonus_pool=0,  # Will update after calculations\n            average_bonus=0,     # Will update after calculations\n            capped_employees=0   # Will update after calculations\n        )\n        \n        # Calculate bonus for each employee\n        employee_results = []\n        total_bonus = 0\n        capped_count = 0\n        \n        for employee in employee_data:\n            # Apply global parameters with potential individual overrides\n            params = self._merge_parameters(global_parameters, employee.parameter_overrides or {})\n            \n            # Calculate bonus\n            result = self.calculation_engine.calculate_final_bonus(\n                base_salary=employee.base_salary,\n                target_bonus_pct=employee.target_bonus_pct or params.get('targetBonusPct', 0),\n                investment_weight=employee.investment_weight or params.get('investmentWeight', 0.6),\n                investment_score_multiplier=employee.investment_score_multiplier,\n                qualitative_weight=employee.qualitative_weight or params.get('qualitativeWeight', 0.4),\n                qual_score_multiplier=employee.qual_score_multiplier,\n                raf=employee.raf,\n                is_mrt=employee.is_mrt,\n                mrt_cap_pct=employee.mrt_cap_pct or params.get('mrtCapPct')\n            )\n            \n            # Create employee calculation result\n            employee_result = await EmployeeCalculationResultDAL(self.db).create(\n                batch_result_id=batch_result.id,\n                employee_data_id=employee.id,\n                final_bonus=result['final_bonus'],\n                pre_raf_bonus=result['pre_raf_bonus'],\n                initial_bonus=result['initial_bonus'],\n                applied_cap=result['cap_applied']\n            )\n            \n            employee_results.append(employee_result)\n            total_bonus += result['final_bonus']\n            if result['cap_applied']:\n                capped_count += 1\n        \n        # Update batch result with summary statistics\n        average_bonus = total_bonus / len(employee_data) if employee_data else 0\n        await BatchCalculationResultDAL(self.db).update(\n            batch_result.id,\n            total_bonus_pool=total_bonus,\n            average_bonus=average_bonus,\n            capped_employees=capped_count\n        )\n        \n        return batch_result\n    \n    def _merge_parameters(self, global_params: dict, individual_overrides: dict) -> dict:\n        \"\"\"Merge global parameters with individual overrides.\"\"\"\n        result = global_params.copy()\n        result.update(individual_overrides)\n        return result\n```",
+        "testStrategy": "1. Unit tests for batch calculation service\n2. Integration tests for batch calculation API endpoints\n3. Test with various batch sizes (small, medium, large)\n4. Validate summary statistics calculation\n5. Test sorting, filtering, and search functionality\n6. Verify export functionality produces correct CSV/Excel files\n7. Test progress tracking for large batches",
+        "priority": "high",
+        "dependencies": [
+          3,
+          6
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Batch Calculation Service",
+            "description": "Develop a service to handle batch calculations for employee data processing",
+            "dependencies": [],
+            "details": "Implement efficient algorithms for processing large datasets. Include error handling for invalid input data. Optimize for performance using parallel processing where applicable. Integrate with existing data models and ensure scalability for future additions.",
+            "status": "done"
+          },
+          {
+            "id": 2,
+            "title": "Create Results Table UI with Sorting and Filtering",
+            "description": "Design and implement a user interface to display calculation results in a table format with sorting and filtering capabilities",
+            "dependencies": [
+              1
+            ],
+            "details": "Use a responsive design for various screen sizes. Implement client-side sorting and filtering for improved performance. Handle large datasets with pagination or virtual scrolling. Include error states for failed calculations or data retrieval.",
+            "status": "done"
+          },
+          {
+            "id": 3,
+            "title": "Develop Summary Statistics Components",
+            "description": "Create components to display summary statistics of the batch calculation results",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Design reusable chart components for visualizing key metrics. Implement real-time updates for live calculations. Ensure accessibility compliance for all statistical representations. Include tooltips for detailed information.",
+            "status": "done"
+          },
+          {
+            "id": 4,
+            "title": "Implement Progress Tracking for Large Batches",
+            "description": "Develop a system to track and display progress for time-consuming batch calculations",
+            "dependencies": [
+              1
+            ],
+            "details": "Use WebSockets or Server-Sent Events for real-time progress updates. Implement a robust error recovery mechanism for interrupted calculations. Design a user-friendly progress indicator with estimated time remaining.",
+            "status": "done"
+          },
+          {
+            "id": 5,
+            "title": "Add Export Functionality",
+            "description": "Implement features to export calculation results in various formats",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Support multiple export formats (CSV, PDF, Excel). Implement server-side generation for large datasets. Include progress tracking for time-consuming exports. Ensure exported data adheres to security and privacy requirements.",
+            "status": "done"
+          },
+          {
+            "id": 6,
+            "title": "Develop Backend API Endpoints",
+            "description": "Create RESTful API endpoints to support batch calculations and result retrieval",
+            "dependencies": [
+              1,
+              4
+            ],
+            "details": "Design scalable API architecture. Implement proper authentication and authorization. Include rate limiting and request validation. Develop comprehensive API documentation using tools like Swagger.",
+            "status": "done"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Implement Individual Compensation Calculator - Data Loading from Batch",
+        "description": "Develop the functionality to load individual employee data from a processed batch into the Individual Compensation Calculator.",
+        "details": "1. Create frontend components:\n   - CalculatorContainer.tsx: Main container for the individual calculator\n   - EmployeeSelector.tsx: Component for selecting an employee from batch results\n2. Implement navigation from batch results to individual calculator\n3. Create state management for individual calculator data\n4. Implement data loading from batch results to individual calculator\n5. Ensure global parameters from the batch are loaded as defaults\n\nExample employee selection component:\n```typescript\nconst EmployeeSelector: React.FC<{\n  batchId: number;\n  onEmployeeSelect: (employeeData: EmployeeData) => void;\n}> = ({ batchId, onEmployeeSelect }) => {\n  const [employees, setEmployees] = useState<EmployeeData[]>([]);\n  const [loading, setLoading] = useState(true);\n  const [error, setError] = useState<string | null>(null);\n  const [searchTerm, setSearchTerm] = useState('');\n  \n  useEffect(() => {\n    const fetchEmployees = async () => {\n      try {\n        setLoading(true);\n        const response = await fetch(`/api/v1/batch/uploads/${batchId}/employees`);\n        \n        if (!response.ok) {\n          throw new Error('Failed to fetch employees');\n        }\n        \n        const data = await response.json();\n        setEmployees(data);\n      } catch (err) {\n        setError(err.message || 'An error occurred');\n      } finally {\n        setLoading(false);\n      }\n    };\n    \n    fetchEmployees();\n  }, [batchId]);\n  \n  const filteredEmployees = employees.filter(emp => \n    emp.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||\n    emp.employee_id?.toLowerCase().includes(searchTerm.toLowerCase())\n  );\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Select Employee</h2>\n      \n      <input\n        type=\"text\"\n        placeholder=\"Search by name or ID\"\n        value={searchTerm}\n        onChange={(e) => setSearchTerm(e.target.value)}\n        className=\"p-2 border rounded w-full mb-4\"\n      />\n      \n      {loading ? (\n        <p>Loading employees...</p>\n      ) : error ? (\n        <p className=\"text-red-500\">{error}</p>\n      ) : (\n        <div className=\"max-h-96 overflow-y-auto\">\n          <table className=\"w-full border-collapse\">\n            <thead>\n              <tr className=\"bg-gray-100\">\n                <th className=\"p-2 text-left\">ID</th>\n                <th className=\"p-2 text-left\">Name</th>\n                <th className=\"p-2 text-left\">Team</th>\n                <th className=\"p-2 text-left\">Base Salary</th>\n                <th className=\"p-2 text-left\">Actions</th>\n              </tr>\n            </thead>\n            <tbody>\n              {filteredEmployees.map(emp => (\n                <tr key={emp.id} className=\"border-t hover:bg-gray-50\">\n                  <td className=\"p-2\">{emp.employee_id}</td>\n                  <td className=\"p-2\">{emp.name}</td>\n                  <td className=\"p-2\">{emp.team}</td>\n                  <td className=\"p-2\">£{emp.base_salary.toLocaleString()}</td>\n                  <td className=\"p-2\">\n                    <button\n                      onClick={() => onEmployeeSelect(emp)}\n                      className=\"px-3 py-1 bg-blue-500 text-white rounded text-sm\"\n                    >\n                      Select\n                    </button>\n                  </td>\n                </tr>\n              ))}\n            </tbody>\n          </table>\n        </div>\n      )}\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for employee selection component\n2. Integration tests for navigation from batch results to individual calculator\n3. Test data loading from batch to individual calculator\n4. Verify global parameters are correctly loaded as defaults\n5. Test search and filtering functionality\n6. Validate handling of missing or incomplete employee data",
+        "priority": "medium",
+        "dependencies": [
+          7
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Design Employee Selection Interface",
+            "description": "Create a user interface component for selecting individual employees from batch calculation results",
+            "dependencies": [],
+            "details": "Develop a responsive table/list view that displays employee data from batch results with clear selection affordances. Include sorting and filtering capabilities to help users locate specific employees. Implement hover states and selection indicators to provide clear feedback. Design should follow existing design system patterns and accessibility guidelines. Include pagination if large datasets are expected.",
+            "status": "done"
+          },
+          {
+            "id": 2,
+            "title": "Implement State Management for Individual Calculator",
+            "description": "Create Redux slices and actions to manage individual calculator data flow",
+            "dependencies": [],
+            "details": "Define Redux state structure for individual calculator data. Create actions for loading, selecting, and clearing employee data. Implement reducers to handle state transitions. Add selectors for accessing individual calculator state. Include error handling for failed data loading. Document the state management approach for team reference. Ensure proper normalization of data to avoid duplication.",
+            "status": "done"
+          },
+          {
+            "id": 3,
+            "title": "Develop API Integration Service",
+            "description": "Create service layer to handle API requests for individual employee data",
+            "dependencies": [
+              2
+            ],
+            "details": "Implement API client functions to fetch detailed employee data. Add error handling and retry logic for resilient data fetching. Create data transformation utilities to convert API responses to application state format. Implement caching strategy to minimize redundant API calls. Document API endpoints and data structures. Include fallback mechanisms for API endpoint mismatches similar to batch calculation service.",
+            "status": "done"
+          },
+          {
+            "id": 4,
+            "title": "Build Navigation System Between Modules",
+            "description": "Implement navigation flow between batch results and individual calculator",
+            "dependencies": [
+              1
+            ],
+            "details": "Create route definitions for transitioning between batch and individual views. Implement navigation actions that preserve state during transitions. Add breadcrumb component for context awareness. Ensure browser history works correctly with the navigation flow. Implement URL parameter handling to support direct linking to individual employee data. Test navigation with various user flows to ensure smooth transitions.",
+            "status": "done"
+          },
+          {
+            "id": 5,
+            "title": "Implement Data Transfer Between Modules",
+            "description": "Create mechanism to pass selected employee data from batch results to individual calculator",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "Develop data transfer service to extract relevant employee data from batch results. Implement data transformation functions to prepare batch data for individual calculator. Add validation to ensure data integrity during transfer. Create loading states for transition periods. Implement error handling for failed data transfers. Test with various data scenarios including edge cases.",
+            "status": "done"
+          },
+          {
+            "id": 6,
+            "title": "Integration Testing and Refinement",
+            "description": "Test complete flow from batch results to individual calculator and refine implementation",
+            "dependencies": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "details": "Create integration tests covering the full user journey. Test with various data volumes and scenarios. Verify proper state management during navigation. Ensure UI components respond correctly to loading and error states. Optimize performance for large datasets. Conduct usability testing with stakeholders. Document any edge cases or limitations discovered during testing. Implement refinements based on testing feedback.",
+            "status": "done"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Implement Individual Compensation Calculator - Input Panel and Real-time Calculation",
+        "description": "Develop the input panel for the Individual Compensation Calculator with real-time bonus calculation updates.",
+        "details": "1. Create frontend components:\n   - InputPanel.tsx: Form for adjusting individual compensation parameters\n   - ResultsPanel.tsx: Display of calculation results\n2. Implement state management for input parameters\n3. Create real-time calculation updates using the frontend calculation engine\n4. Implement input controls for all compensation components:\n   - Base Salary & Target Bonus %\n   - Investment Performance Component (Score Multiplier and Weight)\n   - Qualitative Performance Component (Score Multiplier and Weight)\n   - Revenue Adjustment Factor (RAF)\n   - Policy & Cap Adjustments\n5. Add validation for input values\n\nExample input panel component:\n```typescript\nconst InputPanel: React.FC<{\n  initialData: EmployeeData;\n  globalParameters: BatchParameters;\n  onChange: (data: EmployeeData) => void;\n}> = ({ initialData, globalParameters, onChange }) => {\n  const [data, setData] = useState<EmployeeData>(initialData);\n  \n  // Update parent component when data changes\n  useEffect(() => {\n    onChange(data);\n  }, [data, onChange]);\n  \n  const handleChange = (field: keyof EmployeeData, value: any) => {\n    setData(prev => ({\n      ...prev,\n      [field]: value\n    }));\n  };\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Compensation Inputs</h2>\n      \n      <div className=\"grid grid-cols-1 md:grid-cols-2 gap-4\">\n        {/* Employee Info Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Employee Information</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Employee ID</label>\n            <input\n              type=\"text\"\n              value={data.employee_id || ''}\n              disabled\n              className=\"p-2 border rounded w-full bg-gray-100\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Name</label>\n            <input\n              type=\"text\"\n              value={data.name || ''}\n              disabled\n              className=\"p-2 border rounded w-full bg-gray-100\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Team</label>\n            <input\n              type=\"text\"\n              value={data.team || ''}\n              disabled\n              className=\"p-2 border rounded w-full bg-gray-100\"\n            />\n          </div>\n        </div>\n        \n        {/* Base Compensation Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Base Compensation</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Base Salary (£)</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"1000\"\n              value={data.base_salary || 0}\n              onChange={(e) => handleChange('base_salary', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Target Bonus %</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              max=\"2\"\n              step=\"0.01\"\n              value={data.target_bonus_pct || globalParameters.targetBonusPct || 0}\n              onChange={(e) => handleChange('target_bonus_pct', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n        </div>\n        \n        {/* Investment Performance Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Investment Performance</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Investment Score Multiplier</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={data.investment_score_multiplier || 1}\n              onChange={(e) => handleChange('investment_score_multiplier', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Investment Weight</label>\n            <input\n              type=\"range\"\n              min=\"0\"\n              max=\"1\"\n              step=\"0.01\"\n              value={data.investment_weight || globalParameters.investmentWeight || 0.6}\n              onChange={(e) => {\n                const value = Number(e.target.value);\n                handleChange('investment_weight', value);\n                handleChange('qualitative_weight', 1 - value);\n              }}\n              className=\"w-full\"\n            />\n            <div className=\"flex justify-between text-xs\">\n              <span>0%</span>\n              <span>{((data.investment_weight || globalParameters.investmentWeight || 0.6) * 100).toFixed(0)}%</span>\n              <span>100%</span>\n            </div>\n          </div>\n        </div>\n        \n        {/* Qualitative Performance Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Qualitative Performance</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Qualitative Score Multiplier</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={data.qual_score_multiplier || 1}\n              onChange={(e) => handleChange('qual_score_multiplier', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Qualitative Weight</label>\n            <input\n              type=\"range\"\n              min=\"0\"\n              max=\"1\"\n              step=\"0.01\"\n              value={data.qualitative_weight || globalParameters.qualitativeWeight || 0.4}\n              onChange={(e) => {\n                const value = Number(e.target.value);\n                handleChange('qualitative_weight', value);\n                handleChange('investment_weight', 1 - value);\n              }}\n              className=\"w-full\"\n            />\n            <div className=\"flex justify-between text-xs\">\n              <span>0%</span>\n              <span>{((data.qualitative_weight || globalParameters.qualitativeWeight || 0.4) * 100).toFixed(0)}%</span>\n              <span>100%</span>\n            </div>\n          </div>\n        </div>\n        \n        {/* RAF Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Revenue Adjustment Factor (RAF)</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">RAF Value</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={data.raf || 1}\n              onChange={(e) => handleChange('raf', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n        </div>\n        \n        {/* Policy Settings Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Policy Settings</h3>\n          \n          <div className=\"mb-2 flex items-center\">\n            <input\n              type=\"checkbox\"\n              checked={data.is_mrt || false}\n              onChange={(e) => handleChange('is_mrt', e.target.checked)}\n              className=\"mr-2\"\n              id=\"is_mrt\"\n            />\n            <label htmlFor=\"is_mrt\" className=\"text-sm\">Material Risk Taker (MRT)</label>\n          </div>\n          \n          {data.is_mrt && (\n            <div className=\"mb-2\">\n              <label className=\"block text-sm mb-1\">MRT Cap %</label>\n              <input\n                type=\"number\"\n                min=\"0\"\n                step=\"0.01\"\n                value={data.mrt_cap_pct || globalParameters.mrtCapPct || 1}\n                onChange={(e) => handleChange('mrt_cap_pct', Number(e.target.value))}\n                className=\"p-2 border rounded w-full\"\n              />\n            </div>\n          )}\n        </div>\n      </div>\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for input panel component\n2. Integration tests for real-time calculation updates\n3. Test input validation and constraints\n4. Verify calculation accuracy using test cases from the truth table\n5. Test performance of real-time updates\n6. Validate handling of edge cases and invalid inputs",
+        "priority": "medium",
+        "dependencies": [
+          3,
+          8
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Implement Individual Compensation Calculator - Results Display and Visualization",
+        "description": "Develop the results display and visualization components for the Individual Compensation Calculator.",
+        "details": "1. Create frontend components:\n   - ResultsPanel.tsx: Display of calculation results\n   - BonusBreakdown.tsx: Detailed breakdown of bonus calculation\n   - AlertsPanel.tsx: Display of policy alerts\n   - (Optional V1.1) VisualizationPanel.tsx: Charts for bonus composition and sensitivity\n2. Implement clear display of the final bonus amount\n3. Create detailed breakdown of calculation steps\n4. Add alerts for policy breaches (e.g., bonus exceeding 3x base salary, MRT cap)\n5. (Optional V1.1) Implement visualizations for bonus composition and sensitivity\n6. Add export functionality for individual calculation results\n\nExample results panel component:\n```typescript\nconst ResultsPanel: React.FC<{\n  calculationResult: CalculationResult;\n}> = ({ calculationResult }) => {\n  const {\n    target_bonus,\n    weighted_performance,\n    pre_raf_bonus,\n    initial_bonus,\n    base_salary_cap,\n    mrt_cap,\n    final_bonus,\n    cap_applied\n  } = calculationResult;\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Calculation Results</h2>\n      \n      {/* Final Bonus Display */}\n      <div className=\"mb-6 p-4 bg-blue-50 rounded-lg text-center\">\n        <h3 className=\"text-lg font-bold mb-1\">Final Bonus</h3>\n        <p className=\"text-3xl font-bold text-blue-700\">£{final_bonus.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>\n        \n        {cap_applied && (\n          <div className=\"mt-2 p-2 bg-yellow-100 rounded text-sm text-yellow-800\">\n            {cap_applied === '3x_base' ? (\n              <p>Capped at 3× Base Salary (£{base_salary_cap.toLocaleString()})</p>\n            ) : cap_applied === 'mrt' ? (\n              <p>MRT Cap Applied (£{mrt_cap.toLocaleString()})</p>\n            ) : null}\n          </div>\n        )}\n      </div>\n      \n      {/* Calculation Breakdown */}\n      <div className=\"mb-4\">\n        <h3 className=\"font-bold mb-2\">Calculation Breakdown</h3>\n        \n        <table className=\"w-full border-collapse\">\n          <tbody>\n            <tr className=\"border-b\">\n              <td className=\"py-2 text-sm\">Target Bonus</td>\n              <td className=\"py-2 text-right font-mono\">£{target_bonus.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>\n            </tr>\n            <tr className=\"border-b\">\n              <td className=\"py-2 text-sm\">Weighted Performance</td>\n              <td className=\"py-2 text-right font-mono\">{weighted_performance.toFixed(2)}×</td>\n            </tr>\n            <tr className=\"border-b\">\n              <td className=\"py-2 text-sm\">Pre-RAF Bonus</td>\n              <td className=\"py-2 text-right font-mono\">£{pre_raf_bonus.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>\n            </tr>\n            <tr className=\"border-b\">\n              <td className=\"py-2 text-sm\">RAF Applied</td>\n              <td className=\"py-2 text-right font-mono\">{(initial_bonus / pre_raf_bonus).toFixed(2)}×</td>\n            </tr>\n            <tr className=\"border-b\">\n              <td className=\"py-2 text-sm\">Initial Bonus</td>\n              <td className=\"py-2 text-right font-mono\">£{initial_bonus.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>\n            </tr>\n            {cap_applied && (\n              <tr className=\"border-b bg-yellow-50\">\n                <td className=\"py-2 text-sm font-bold\">Cap Applied</td>\n                <td className=\"py-2 text-right font-mono font-bold\">\n                  {cap_applied === '3x_base' ? '3× Base Salary' : 'MRT Cap'}\n                </td>\n              </tr>\n            )}\n            <tr className=\"border-b font-bold\">\n              <td className=\"py-2\">Final Bonus</td>\n              <td className=\"py-2 text-right font-mono\">£{final_bonus.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>\n            </tr>\n          </tbody>\n        </table>\n      </div>\n      \n      {/* Export Button */}\n      <div className=\"mt-4\">\n        <button \n          onClick={() => {\n            // Export logic here\n            const csvContent = `Target Bonus,£${target_bonus}\\n` +\n                            `Weighted Performance,${weighted_performance}\\n` +\n                            `Pre-RAF Bonus,£${pre_raf_bonus}\\n` +\n                            `RAF Applied,${(initial_bonus / pre_raf_bonus).toFixed(2)}\\n` +\n                            `Initial Bonus,£${initial_bonus}\\n` +\n                            `${cap_applied ? 'Cap Applied,' + (cap_applied === '3x_base' ? '3× Base Salary' : 'MRT Cap') + '\\n' : ''}` +\n                            `Final Bonus,£${final_bonus}`;\n            \n            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });\n            const link = document.createElement('a');\n            const url = URL.createObjectURL(blob);\n            link.setAttribute('href', url);\n            link.setAttribute('download', 'bonus_calculation.csv');\n            link.style.visibility = 'hidden';\n            document.body.appendChild(link);\n            link.click();\n            document.body.removeChild(link);\n          }}\n          className=\"px-4 py-2 bg-green-500 text-white rounded\"\n        >\n          Export Results\n        </button>\n      </div>\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for results display components\n2. Verify calculation breakdown is accurate and complete\n3. Test alert display for policy breaches\n4. Validate export functionality produces correct files\n5. (If implemented) Test visualizations for accuracy and responsiveness\n6. Test with various calculation scenarios from the truth table",
+        "priority": "medium",
+        "dependencies": [
+          9
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "Implement Scenario Playground Module - Data Seeding",
+        "description": "Develop the functionality to seed the Scenario Playground with data from a processed batch or individual calculator.",
+        "details": "1. Create frontend components:\n   - ScenarioPlayground.tsx: Main container for the scenario playground\n   - DataSourceSelector.tsx: Component for selecting the data source\n2. Implement backend endpoints:\n   - POST /api/v1/scenarios: Create a new scenario\n   - GET /api/v1/scenarios/{scenario_id}: Get a saved scenario\n3. Create data seeding functionality:\n   - From a processed batch\n   - (Optional) From an individual employee\n4. Implement state management for scenario data\n\nExample data source selector component:\n```typescript\nconst DataSourceSelector: React.FC<{\n  onSourceSelect: (source: { type: 'batch' | 'individual', id: number }) => void;\n}> = ({ onSourceSelect }) => {\n  const [batches, setBatches] = useState<BatchUpload[]>([]);\n  const [loading, setLoading] = useState(true);\n  const [error, setError] = useState<string | null>(null);\n  \n  useEffect(() => {\n    const fetchBatches = async () => {\n      try {\n        setLoading(true);\n        const response = await fetch('/api/v1/batch/uploads');\n        \n        if (!response.ok) {\n          throw new Error('Failed to fetch batches');\n        }\n        \n        const data = await response.json();\n        setBatches(data.filter(batch => batch.status === 'completed'));\n      } catch (err) {\n        setError(err.message || 'An error occurred');\n      } finally {\n        setLoading(false);\n      }\n    };\n    \n    fetchBatches();\n  }, []);\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Select Data Source for Scenario</h2>\n      \n      {loading ? (\n        <p>Loading data sources...</p>\n      ) : error ? (\n        <p className=\"text-red-500\">{error}</p>\n      ) : (\n        <div>\n          <h3 className=\"font-bold mb-2\">Available Batches</h3>\n          \n          {batches.length === 0 ? (\n            <p className=\"text-gray-500\">No completed batches available</p>\n          ) : (\n            <div className=\"space-y-2\">\n              {batches.map(batch => (\n                <div key={batch.id} className=\"p-3 border rounded hover:bg-gray-50 cursor-pointer\"\n                     onClick={() => onSourceSelect({ type: 'batch', id: batch.id })}>\n                  <p className=\"font-medium\">{batch.filename}</p>\n                  <p className=\"text-sm text-gray-500\">\n                    Uploaded: {new Date(batch.uploaded_at).toLocaleString()}\n                  </p>\n                  <p className=\"text-sm text-gray-500\">\n                    {batch.employee_count || 0} employees\n                  </p>\n                </div>\n              ))}\n            </div>\n          )}\n          \n          {/* Individual employee selection could be added here if implemented */}\n        </div>\n      )}\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for data source selection component\n2. Integration tests for scenario creation API endpoints\n3. Test data seeding from batch results\n4. (If implemented) Test data seeding from individual employee\n5. Verify state management correctly initializes with seeded data\n6. Test handling of invalid or incomplete data sources",
+        "priority": "medium",
+        "dependencies": [
+          7,
+          10
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "Implement Scenario Playground Module - Parameter Adjustment and Impact Assessment",
+        "description": "Develop the interface for adjusting global calculation parameters in the Scenario Playground and assessing their impact on the dataset.",
+        "details": "1. Create frontend components:\n   - ScenarioParameterPanel.tsx: Interface for adjusting global parameters\n   - ScenarioResultsPanel.tsx: Display of scenario calculation results\n2. Implement parameter adjustment for:\n   - RAF sensitivity and clamp values\n   - MRT Cap %\n   - Investment/Qualitative weights\n   - Parameters for performance-to-multiplier curves\n3. Create real-time recalculation of bonuses for the entire dataset\n4. Implement summary statistics updates\n\nExample scenario parameter panel component:\n```typescript\nconst ScenarioParameterPanel: React.FC<{\n  initialParameters: ScenarioParameters;\n  onChange: (parameters: ScenarioParameters) => void;\n}> = ({ initialParameters, onChange }) => {\n  const [parameters, setParameters] = useState<ScenarioParameters>(initialParameters);\n  \n  // Update parent component when parameters change\n  useEffect(() => {\n    onChange(parameters);\n  }, [parameters, onChange]);\n  \n  const handleChange = (field: keyof ScenarioParameters, value: number | boolean) => {\n    setParameters(prev => {\n      const updated = {\n        ...prev,\n        [field]: value\n      };\n      \n      // If investment weight changes, adjust qualitative weight to maintain sum of 1\n      if (field === 'investmentWeight') {\n        updated.qualitativeWeight = 1 - Number(value);\n      } else if (field === 'qualitativeWeight') {\n        updated.investmentWeight = 1 - Number(value);\n      }\n      \n      return updated;\n    });\n  };\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Scenario Parameters</h2>\n      \n      <div className=\"grid grid-cols-1 md:grid-cols-2 gap-4\">\n        {/* Performance Weights Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Performance Weights</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Investment Weight</label>\n            <input\n              type=\"range\"\n              min=\"0\"\n              max=\"1\"\n              step=\"0.01\"\n              value={parameters.investmentWeight}\n              onChange={(e) => handleChange('investmentWeight', Number(e.target.value))}\n              className=\"w-full\"\n            />\n            <div className=\"flex justify-between text-xs\">\n              <span>0%</span>\n              <span>{(parameters.investmentWeight * 100).toFixed(0)}%</span>\n              <span>100%</span>\n            </div>\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">Qualitative Weight</label>\n            <input\n              type=\"range\"\n              min=\"0\"\n              max=\"1\"\n              step=\"0.01\"\n              value={parameters.qualitativeWeight}\n              onChange={(e) => handleChange('qualitativeWeight', Number(e.target.value))}\n              className=\"w-full\"\n            />\n            <div className=\"flex justify-between text-xs\">\n              <span>0%</span>\n              <span>{(parameters.qualitativeWeight * 100).toFixed(0)}%</span>\n              <span>100%</span>\n            </div>\n          </div>\n        </div>\n        \n        {/* RAF Settings Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">RAF Settings</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">RAF Sensitivity Factor</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={parameters.rafSensitivity}\n              onChange={(e) => handleChange('rafSensitivity', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">RAF Lower Clamp</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={parameters.rafLowerClamp}\n              onChange={(e) => handleChange('rafLowerClamp', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">RAF Upper Clamp</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={parameters.rafUpperClamp}\n              onChange={(e) => handleChange('rafUpperClamp', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n        </div>\n        \n        {/* Cap Settings Section */}\n        <div className=\"mb-4\">\n          <h3 className=\"font-bold mb-2\">Cap Settings</h3>\n          \n          <div className=\"mb-2\">\n            <label className=\"block text-sm mb-1\">MRT Cap %</label>\n            <input\n              type=\"number\"\n              min=\"0\"\n              step=\"0.01\"\n              value={parameters.mrtCapPct}\n              onChange={(e) => handleChange('mrtCapPct', Number(e.target.value))}\n              className=\"p-2 border rounded w-full\"\n            />\n          </div>\n        </div>\n      </div>\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for parameter adjustment components\n2. Integration tests for real-time recalculation\n3. Test parameter validation and constraints\n4. Verify calculation accuracy for the entire dataset\n5. Test performance with large datasets\n6. Validate summary statistics updates",
+        "priority": "medium",
+        "dependencies": [
+          11
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Fix Parameter Panel Undefined Value Errors",
+            "description": "Fix the \"Cannot read properties of undefined (reading 'toFixed')\" errors in ScenarioParameterPanel and IndividualCalculator components",
+            "details": "- Fix RAF value error at ScenarioParameterPanel.tsx line 173\n- Fix IndividualCalculator.tsx line 518 error\n- Ensure proper default parameter initialization\n- Handle undefined parameter values gracefully",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 12
+          },
+          {
+            "id": 2,
+            "title": "Implement Navigation Header for Scenario Playground",
+            "description": "Add NavigationHeader component to scenario playground pages to allow users to navigate back to other modules",
+            "details": "- Add NavigationHeader to scenario pages\n- Ensure consistent navigation across all modules\n- Fix issue where users get stuck after batch upload completion",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 12
+          },
+          {
+            "id": 3,
+            "title": "Fix Scenario Creation API Endpoint",
+            "description": "Fix the 422 Unprocessable Entity error when creating scenarios by updating frontend to send FormData instead of JSON",
+            "details": "- Convert scenario creation request from JSON to FormData format\n- Update frontend to match backend endpoint expectations\n- Fix parameter serialization for scenario creation",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 12
+          },
+          {
+            "id": 4,
+            "title": "Implement Real-time Parameter Validation",
+            "description": "Add validation for parameter inputs to prevent invalid values and provide user feedback",
+            "details": "- Add range validation for all parameter inputs\n- Implement real-time validation feedback\n- Ensure parameter constraints are enforced (e.g., weights sum to 1)\n- Add error handling for invalid parameter combinations",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 12
+          },
+          {
+            "id": 5,
+            "title": "Implement Real-time Scenario Recalculation",
+            "description": "Develop the functionality to recalculate all bonus values when parameters change in the scenario playground",
+            "details": "- Connect parameter changes to calculation engine\n- Implement efficient batch recalculation for large datasets\n- Add loading states during recalculation\n- Optimize performance for real-time updates",
+            "status": "done",
+            "dependencies": [
+              "12.1"
+            ],
+            "parentTaskId": 12
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "Implement Scenario Playground Module - Scenario Management and Comparison",
+        "description": "Complete the scenario management functionality by implementing proper scenario persistence, CRUD operations, and comparison features. Current implementation has basic scenario creation but lacks proper saving, loading, and comparison.",
+        "details": "The backend has scenario models and basic endpoints for creating temporary scenarios from batch uploads. The frontend has a working scenario playground but no persistent scenario management. Need to implement:\n1. Backend scenario DAL and full CRUD endpoints\n2. Frontend scenario management UI\n3. Scenario comparison functionality\n4. Integration with existing playground\n\nCurrent status:\n✅ Database models (BatchScenario, ScenarioAuditLog)\n✅ Basic endpoints for temporary scenario creation\n✅ Frontend scenario playground\n❌ Persistent scenario storage and management\n❌ Scenario comparison UI\n❌ Full CRUD operations",
+        "testStrategy": "1. Unit tests for scenario DAL operations\n2. Integration tests for scenario CRUD endpoints\n3. Frontend tests for scenario management components\n4. End-to-end tests for scenario saving, loading, and comparison\n5. Test scenario versioning and audit trails\n6. Performance tests with multiple scenarios",
+        "priority": "medium",
+        "dependencies": [
+          12
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create Scenario DAL (Data Access Layer)",
+            "description": "Create scenario_dal.py following the existing pattern from batch_upload_dal.py to handle all database operations for scenarios.",
+            "details": "Create backend/app/dal/scenario_dal.py with methods:\n- create(scenario_data: BatchScenarioCreate)\n- get(scenario_id: str)\n- get_by_session(session_id: str)\n- update(scenario_id: str, updates: BatchScenarioUpdate)\n- delete(scenario_id: str)\n- list_by_session(session_id: str, include_audit_logs: bool = False)\n\nFollow the same pattern as batch_upload_dal.py for consistency.",
+            "status": "done",
+            "dependencies": []
+          },
+          {
+            "id": 2,
+            "title": "Implement Full Scenario CRUD Endpoints",
+            "description": "Extend backend/app/routers/scenarios.py to implement proper scenario persistence and CRUD operations.",
+            "details": "Add missing endpoints to scenarios.py:\n- POST /api/v1/scenarios (save scenario - replace temporary implementation)\n- GET /api/v1/scenarios (list scenarios for session)\n- PUT /api/v1/scenarios/{scenario_id} (update scenario)\n- DELETE /api/v1/scenarios/{scenario_id} (delete scenario)\n- POST /api/v1/scenarios/{scenario_id}/duplicate (duplicate scenario)\n\nUpdate existing endpoints to use proper scenario DAL and persistent storage instead of temporary scenario generation.",
+            "status": "done",
+            "dependencies": [
+              1
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Create Scenario Management Frontend Components",
+            "description": "Create frontend components for saving, loading, and managing scenarios.",
+            "details": "Create frontend/src/components/scenario/ScenarioManager.tsx:\n- Save current scenario with name and description\n- List saved scenarios for current session\n- Load selected scenario into playground\n- Delete scenarios\n- Duplicate scenarios\n\nIntegrate with existing ScenarioPlayground.tsx component.",
+            "status": "done",
+            "dependencies": [
+              2
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Implement Scenario Comparison Component",
+            "description": "Create a component to compare multiple scenarios side by side.",
+            "details": "Create frontend/src/components/scenario/ScenarioComparison.tsx:\n- Select multiple scenarios for comparison\n- Display parameter differences\n- Show calculation result differences\n- Highlight key metrics (total bonus, employee impacts)\n- Export comparison results\n\nAllow access from scenario management interface.",
+            "status": "done",
+            "dependencies": [
+              3
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Add Scenario Versioning and Audit Trail UI",
+            "description": "Surface scenario audit logs in the frontend and implement versioning features.",
+            "details": "Extend scenario management to show:\n- Scenario creation and modification history\n- Parameter change tracking\n- User-friendly version display\n- Ability to revert to previous versions\n\nUse existing ScenarioAuditLog model data from backend.",
+            "status": "done",
+            "dependencies": [
+              4
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Update Frontend Services for Full Scenario Management",
+            "description": "Extend frontend/src/services/scenarioService.ts to support all new scenario operations.",
+            "details": "Add service methods for:\n- saveScenario(scenarioData, name, description)\n- updateScenario(scenarioId, updates)\n- deleteScenario(scenarioId)\n- listScenarios(sessionId)\n- duplicateScenario(scenarioId, newName)\n- getScenarioAuditLog(scenarioId)\n\nEnsure proper error handling and TypeScript types.",
+            "status": "done",
+            "dependencies": [
+              2
+            ]
+          },
+          {
+            "id": 7,
+            "title": "Integration Testing and Bug Fixes",
+            "description": "Test the complete scenario management workflow and fix any integration issues.",
+            "details": "Comprehensive testing of:\n- Creating scenarios from batch uploads\n- Saving and loading scenarios\n- Scenario comparison functionality\n- Parameter modification and recalculation\n- Audit trail and versioning\n- Error handling for edge cases\n\nFix any issues discovered during testing.",
+            "status": "done",
+            "dependencies": [
+              5,
+              6
+            ]
+          }
+        ],
+        "complexityScore": 7
+      },
+      {
+        "id": 14,
+        "title": "Implement Scenario Playground Module - Visualizations and Reporting",
+        "description": "Develop the visualization and reporting components for the Scenario Playground.",
+        "details": "1. Create frontend components:\n   - ScenarioVisualization.tsx: Charts and visualizations for scenario data\n   - ScenarioSummary.tsx: Summary statistics for the scenario\n   - ScenarioExport.tsx: Export functionality for scenario data\n2. Implement visualizations:\n   - Bonus distribution histograms\n   - Team-level aggregation charts\n   - Sensitivity analysis charts\n3. Create summary statistics display\n4. Implement export functionality for scenario data\n\nExample visualization component:\n```typescript\nimport { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';\n\nconst ScenarioVisualization: React.FC<{\n  scenarioResults: ScenarioResults;\n}> = ({ scenarioResults }) => {\n  // Prepare data for team-level aggregation chart\n  const teamData = Object.entries(scenarioResults.teamAggregations).map(([team, data]) => ({\n    team,\n    totalBonus: data.totalBonus,\n    averageBonus: data.averageBonus,\n    employeeCount: data.employeeCount\n  }));\n  \n  // Prepare data for bonus distribution histogram\n  const bonusRanges = [\n    '0-50k', '50k-100k', '100k-150k', '150k-200k', '200k-250k',\n    '250k-300k', '300k-350k', '350k-400k', '400k-450k', '450k-500k', '500k+'\n  ];\n  \n  const distributionData = bonusRanges.map(range => {\n    const count = scenarioResults.bonusDistribution[range] || 0;\n    return { range, count };\n  });\n  \n  return (\n    <div className=\"p-4 border rounded-lg\">\n      <h2 className=\"text-xl font-bold mb-4\">Scenario Visualizations</h2>\n      \n      <div className=\"mb-6\">\n        <h3 className=\"font-bold mb-2\">Team Aggregations</h3>\n        <div className=\"h-80\">\n          <ResponsiveContainer width=\"100%\" height=\"100%\">\n            <BarChart data={teamData}>\n              <CartesianGrid strokeDasharray=\"3 3\" />\n              <XAxis dataKey=\"team\" />\n              <YAxis yAxisId=\"left\" orientation=\"left\" stroke=\"#8884d8\" />\n              <YAxis yAxisId=\"right\" orientation=\"right\" stroke=\"#82ca9d\" />\n              <Tooltip />\n              <Legend />\n              <Bar yAxisId=\"left\" dataKey=\"totalBonus\" name=\"Total Bonus (£)\" fill=\"#8884d8\" />\n              <Bar yAxisId=\"right\" dataKey=\"averageBonus\" name=\"Average Bonus (£)\" fill=\"#82ca9d\" />\n            </BarChart>\n          </ResponsiveContainer>\n        </div>\n      </div>\n      \n      <div className=\"mb-6\">\n        <h3 className=\"font-bold mb-2\">Bonus Distribution</h3>\n        <div className=\"h-80\">\n          <ResponsiveContainer width=\"100%\" height=\"100%\">\n            <BarChart data={distributionData}>\n              <CartesianGrid strokeDasharray=\"3 3\" />\n              <XAxis dataKey=\"range\" />\n              <YAxis />\n              <Tooltip />\n              <Legend />\n              <Bar dataKey=\"count\" name=\"Number of Employees\" fill=\"#8884d8\" />\n            </BarChart>\n          </ResponsiveContainer>\n        </div>\n      </div>\n      \n      <div className=\"mb-6\">\n        <h3 className=\"font-bold mb-2\">Summary Statistics</h3>\n        <div className=\"grid grid-cols-1 md:grid-cols-3 gap-4\">\n          <div className=\"p-4 bg-blue-50 rounded-lg text-center\">\n            <h4 className=\"text-sm font-bold mb-1\">Total Bonus Pool</h4>\n            <p className=\"text-2xl font-bold text-blue-700\">£{scenarioResults.totalBonusPool.toLocaleString()}</p>\n          </div>\n          <div className=\"p-4 bg-green-50 rounded-lg text-center\">\n            <h4 className=\"text-sm font-bold mb-1\">Average Bonus</h4>\n            <p className=\"text-2xl font-bold text-green-700\">£{scenarioResults.averageBonus.toLocaleString()}</p>\n          </div>\n          <div className=\"p-4 bg-yellow-50 rounded-lg text-center\">\n            <h4 className=\"text-sm font-bold mb-1\">Capped Employees</h4>\n            <p className=\"text-2xl font-bold text-yellow-700\">{scenarioResults.cappedEmployees} / {scenarioResults.totalEmployees}</p>\n          </div>\n        </div>\n      </div>\n      \n      <div>\n        <button \n          onClick={() => {\n            // Export logic here\n            const csvContent = `Team,Total Bonus,Average Bonus,Employee Count\\n` +\n                            teamData.map(team => \n                              `${team.team},${team.totalBonus},${team.averageBonus},${team.employeeCount}`\n                            ).join('\\n');\n            \n            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });\n            const link = document.createElement('a');\n            const url = URL.createObjectURL(blob);\n            link.setAttribute('href', url);\n            link.setAttribute('download', 'scenario_results.csv');\n            link.style.visibility = 'hidden';\n            document.body.appendChild(link);\n            link.click();\n            document.body.removeChild(link);\n          }}\n          className=\"px-4 py-2 bg-green-500 text-white rounded\"\n        >\n          Export Results\n        </button>\n      </div>\n    </div>\n  );\n};\n```",
+        "testStrategy": "1. Unit tests for visualization components\n2. Verify chart data is correctly derived from scenario results\n3. Test summary statistics calculation\n4. Validate export functionality produces correct files\n5. Test with various dataset sizes and distributions\n6. Verify visualizations are responsive and render correctly on different screen sizes",
+        "priority": "medium",
+        "dependencies": [
+          13
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 15,
+        "title": "Implement Session Management and Application Workflow",
+        "description": "Develop the session management system and implement the overall application workflow as specified in FR0.",
+        "details": "1. Create frontend components:\n   - AppLayout.tsx: Main application layout with navigation\n   - LandingPage.tsx: Default landing page (Batch Upload interface)\n   - SessionManager.tsx: Component for managing the user session\n2. Implement backend endpoints:\n   - POST /api/v1/batch/sessions: Create a new anonymous session\n   - GET /api/v1/batch/sessions/current: Get current session details\n3. Create session management logic:\n   - Generate and store anonymous session IDs\n   - Associate uploaded data with sessions\n   - Implement session expiration and cleanup\n4. Implement the overall application workflow:\n   - Landing Page -> Batch Upload -> Column Mapping -> Parameter Configuration -> Batch Results\n   - Batch Results -> Individual Calculator\n   - Batch Results/Individual Calculator -> Scenario Playground\n5. Add navigation between modules\n6. Implement data retention policies\n\nExample session management service:\n```python\nclass SessionService:\n    def __init__(self, db: Session):\n        self.db = db\n    \n    async def create_session(self) -> SessionModel:\n        \"\"\"Create a new anonymous session.\"\"\"\n        # Generate a secure random session ID\n        session_id = secrets.token_urlsafe(32)\n        \n        # Set expiration time (e.g., 24 hours from now)\n        expires_at = datetime.utcnow() + timedelta(hours=24)\n        \n        # Create session in database\n        session = await SessionDAL(self.db).create(\n            id=session_id,\n            expires_at=expires_at\n        )\n        \n        return session\n    \n    async def get_session(self, session_id: str) -> Optional[SessionModel]:\n        \"\"\"Get a session by ID.\"\"\"\n        session = await SessionDAL(self.db).get_by_id(session_id)\n        \n        if not session:\n            return None\n        \n        # Check if session has expired\n        if session.expires_at < datetime.utcnow():\n            await self.cleanup_session(session_id)\n            return None\n        \n        return session\n    \n    async def extend_session(self, session_id: str) -> Optional[SessionModel]:\n        \"\"\"Extend the expiration time of a session.\"\"\"\n        session = await self.get_session(session_id)\n        \n        if not session:\n            return None\n        \n        # Extend expiration time\n        new_expires_at = datetime.utcnow() + timedelta(hours=24)\n        \n        # Update session in database\n        updated_session = await SessionDAL(self.db).update(\n            session_id,\n            expires_at=new_expires_at\n        )\n        \n        return updated_session\n    \n    async def cleanup_session(self, session_id: str) -> None:\n        \"\"\"Clean up all data associated with a session.\"\"\"\n        # Delete all batch uploads associated with this session\n        batch_uploads = await BatchUploadDAL(self.db).get_by_session_id(session_id)\n        \n        for batch_upload in batch_uploads:\n            # Delete employee data associated with this batch upload\n            await EmployeeDataDAL(self.db).delete_by_batch_upload_id(batch_upload.id)\n            \n            # Delete the batch upload itself\n            await BatchUploadDAL(self.db).delete(batch_upload.id)\n        \n        # Delete all scenarios associated with this session\n        scenarios = await BatchScenarioDAL(self.db).get_by_session_id(session_id)\n        \n        for scenario in scenarios:\n            # Delete calculation results associated with this scenario\n            batch_results = await BatchCalculationResultDAL(self.db).get_by_scenario_id(scenario.id)\n            \n            for batch_result in batch_results:\n                await EmployeeCalculationResultDAL(self.db).delete_by_batch_result_id(batch_result.id)\n                await BatchCalculationResultDAL(self.db).delete(batch_result.id)\n            \n            # Delete the scenario itself\n            await BatchScenarioDAL(self.db).delete(scenario.id)\n        \n        # Delete all templates associated with this session\n        await ImportTemplateDAL(self.db).delete_by_session_id(session_id)\n        \n        # Finally, delete the session itself\n        await SessionDAL(self.db).delete(session_id)\n```",
+        "testStrategy": "1. Unit tests for session management components and services\n2. Integration tests for session API endpoints\n3. Test session creation, expiration, and cleanup\n4. Verify data retention policies work as expected\n5. Test the overall application workflow\n6. Validate navigation between modules\n7. Test with multiple concurrent sessions",
+        "priority": "high",
+        "dependencies": [
+          4,
+          7,
+          10,
+          14
+        ],
+        "status": "done",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-06-20T11:47:06.269Z",
+      "updated": "2025-06-20T11:47:06.271Z",
+      "description": "Tasks for master context"
+    }
+  }
+}

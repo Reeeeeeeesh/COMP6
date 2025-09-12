@@ -38,9 +38,9 @@ backend/.env.example
 # OS specific
 .DS_Store
 
-# Task files
-tasks.json
-tasks/
+# Task files (commented out to include in repo)
+# tasks.json
+# tasks/
 
 # Test files and debug scripts
 test_*.py

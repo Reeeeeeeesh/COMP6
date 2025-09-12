@@ -1,0 +1,215 @@
+# Task ID: 5
+# Title: Implement Batch Processing Module - Column Mapping and Template Management
+# Status: deferred
+# Dependencies: 4
+# Priority: medium
+# Description: Develop the column mapping interface and template management functionality for the Batch Processing Module.
+# Details:
+1. Create frontend components:
+   - ColumnMapper.tsx: Interface for mapping CSV columns to system fields
+   - TemplateManager.tsx: Component for saving and loading mapping templates
+2. Implement backend endpoints:
+   - POST /api/v1/batch/uploads/{upload_id}/map_and_process: Submit column mappings
+   - POST /api/v1/batch/templates: Create a new template
+   - GET /api/v1/batch/templates: List templates
+   - GET /api/v1/batch/templates/{template_id}: Get a specific template
+   - PUT /api/v1/batch/templates/{template_id}: Update a template
+   - DELETE /api/v1/batch/templates/{template_id}: Delete a template
+   - POST /api/v1/batch/templates/{template_id}/apply: Apply template to an upload
+3. Implement column auto-mapping algorithm based on column name similarity
+4. Create UI for specifying default values for unmapped required fields
+5. Implement template storage and retrieval logic
+
+Example column mapping component:
+```typescript
+const ColumnMapper: React.FC<{
+  sourceColumns: string[];
+  targetFields: {name: string; required: boolean}[];
+  onSubmit: (mappings: Record<string, string>, defaults: Record<string, any>) => void;
+}> = ({ sourceColumns, targetFields, onSubmit }) => {
+  const [mappings, setMappings] = useState<Record<string, string>>({});
+  const [defaults, setDefaults] = useState<Record<string, any>>({});
+  
+  // Auto-mapping on component mount
+  useEffect(() => {
+    const suggestedMappings = {};
+    
+    targetFields.forEach(target => {
+      // Find best match in source columns
+      const bestMatch = sourceColumns.find(src => 
+        src.toLowerCase().includes(target.name.toLowerCase()) ||
+        target.name.toLowerCase().includes(src.toLowerCase())
+      );
+      
+      if (bestMatch) {
+        suggestedMappings[target.name] = bestMatch;
+      }
+    });
+    
+    setMappings(suggestedMappings);
+  }, [sourceColumns, targetFields]);
+  
+  const handleMappingChange = (targetField: string, sourceColumn: string) => {
+    setMappings(prev => ({
+      ...prev,
+      [targetField]: sourceColumn
+    }));
+  };
+  
+  const handleDefaultChange = (targetField: string, value: any) => {
+    setDefaults(prev => ({
+      ...prev,
+      [targetField]: value
+    }));
+  };
+  
+  const handleSubmit = () => {
+    onSubmit(mappings, defaults);
+  };
+  
+  return (
+    <div className="p-4">
+      <h2 className="text-xl font-bold mb-4">Map Columns</h2>
+      
+      {targetFields.map(field => (
+        <div key={field.name} className="mb-4">
+          <label className="block mb-2">
+            {field.name} {field.required && <span className="text-red-500">*</span>}
+          </label>
+          
+          <select
+            value={mappings[field.name] || ''}
+            onChange={(e) => handleMappingChange(field.name, e.target.value)}
+            className="p-2 border rounded w-full mb-2"
+          >
+            <option value="">-- Select source column --</option>
+            {sourceColumns.map(col => (
+              <option key={col} value={col}>{col}</option>
+            ))}
+          </select>
+          
+          {!mappings[field.name] && field.required && (
+            <div>
+              <label className="block mb-1 text-sm">Default value:</label>
+              <input
+                type="text"
+                value={defaults[field.name] || ''}
+                onChange={(e) => handleDefaultChange(field.name, e.target.value)}
+                className="p-2 border rounded w-full"
+                required
+              />
+            </div>
+          )}
+        </div>
+      ))}
+      
+      <button 
+        onClick={handleSubmit}
+        className="px-4 py-2 bg-blue-500 text-white rounded"
+      >
+        Submit Mapping
+      </button>
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for column mapping components
+2. Integration tests for template management API endpoints
+3. Test auto-mapping algorithm with various column naming conventions
+4. Validate template saving and loading functionality
+5. Test handling of required vs. optional fields
+6. Verify default value application for unmapped fields
+
+# Subtasks:
+## 1. Develop Frontend Column Mapping Interface [in-progress]
+### Dependencies: None
+### Description: Create a drag-and-drop interface for users to map source columns to target fields with visual feedback and validation.
+### Details:
+Acceptance Criteria:
+- Interactive drag-and-drop functionality for mapping columns
+- Visual indicators for mapped and unmapped fields
+- Validation to prevent invalid mappings
+- Preview of mapping results
+- Responsive design for different screen sizes
+
+Technical Considerations:
+- Use React with a drag-and-drop library (e.g., react-dnd)
+- Implement state management for mapping configuration
+- Create reusable components for source/target fields
+- Add error handling for edge cases
+- Ensure accessibility compliance
+
+## 2. Build Template Management UI Components [pending]
+### Dependencies: 5.1
+### Description: Develop UI components for saving, loading, and managing mapping templates with CRUD operations.
+### Details:
+Acceptance Criteria:
+- Template creation form with name and description fields
+- Template listing with search and filter capabilities
+- Edit and delete functionality for existing templates
+- Template sharing options between users
+- Version history for templates
+
+Technical Considerations:
+- Create modular components for template operations
+- Implement form validation for template metadata
+- Design responsive layouts for template management screens
+- Add confirmation dialogs for destructive actions
+- Include loading states and error handling
+
+## 3. Implement Backend API Endpoints for Column Mapping [pending]
+### Dependencies: None
+### Description: Create RESTful API endpoints to handle column mapping operations including validation and persistence.
+### Details:
+Acceptance Criteria:
+- API endpoint to validate mapping configurations
+- Endpoint to save mapping configurations
+- Endpoint to retrieve existing mappings
+- Proper error handling and validation
+- Performance optimization for large datasets
+
+Technical Considerations:
+- Design RESTful API following best practices
+- Implement input validation and sanitization
+- Create database schema for mapping storage
+- Add authentication and authorization checks
+- Document API endpoints with OpenAPI/Swagger
+
+## 4. Develop Backend API Endpoints for Template Management [pending]
+### Dependencies: 5.3
+### Description: Create API endpoints for CRUD operations on mapping templates with user permissions and sharing capabilities.
+### Details:
+Acceptance Criteria:
+- CRUD endpoints for template management
+- User permission controls for templates
+- Template sharing and access control
+- Version control for templates
+- Bulk operations for template management
+
+Technical Considerations:
+- Design database schema for templates with versioning
+- Implement permission model for template access
+- Create efficient queries for template retrieval
+- Add transaction support for template operations
+- Implement caching for frequently accessed templates
+
+## 5. Implement Auto-Mapping Algorithm [pending]
+### Dependencies: 5.1, 5.3
+### Description: Develop an intelligent algorithm to automatically suggest column mappings based on column names, data types, and historical mappings.
+### Details:
+Acceptance Criteria:
+- Algorithm to suggest mappings based on column names similarity
+- Consider data types for mapping suggestions
+- Learn from historical mapping patterns
+- Confidence score for suggested mappings
+- User interface to accept/reject suggestions
+
+Technical Considerations:
+- Implement string similarity algorithms (e.g., Levenshtein distance)
+- Create machine learning model for pattern recognition
+- Design efficient algorithm for large datasets
+- Add feedback loop to improve suggestions over time
+- Implement fallback strategies when confidence is low
+

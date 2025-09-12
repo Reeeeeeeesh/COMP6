@@ -12,6 +12,10 @@ export interface BatchParameters {
   investmentScoreMultiplier: number;
   qualScoreMultiplier: number;
   raf: number;
+  // When enabled, row-level values from the uploaded CSV will override
+  // the corresponding defaults when present (target bonus %, weights,
+  // multipliers, MRT cap). RAF still follows the Use Direct RAF switch.
+  useRowValuesWhenPresent?: boolean;
   rafSensitivity?: number;
   rafLowerClamp?: number;
   rafUpperClamp?: number;
@@ -68,6 +72,7 @@ const defaultParameters: BatchParameters = {
   investmentScoreMultiplier: 1.0,
   qualScoreMultiplier: 1.0,
   raf: 1.0,
+  useRowValuesWhenPresent: false,
   rafSensitivity: 0.2,
   rafLowerClamp: 0,
   rafUpperClamp: 1.5,
@@ -395,6 +400,39 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
   
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
+      {/* ROW-LEVEL OVERRIDES - PROMINENT BANNER */}
+      <div className="mb-6 p-5 rounded-xl border-2 shadow-sm bg-amber-50 border-amber-400 ring-1 ring-amber-300">
+        <div className="flex items-start">
+          <div className="mr-3 text-amber-600">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M8.257 3.099c.765-1.36 2.721-1.36 3.486 0l6.518 11.59c.75 1.334-.213 2.986-1.742 2.986H3.48c-1.53 0-2.492-1.652-1.743-2.986L8.257 3.1z" />
+              <path d="M11 14a1 1 0 11-2 0 1 1 0 012 0zm-.75-7.5a.75.75 0 00-1.5 0v5a.75.75 0 001.5 0v-5z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h2 className="text-xl font-extrabold text-amber-900 tracking-tight">Row‑level Overrides</h2>
+            <p className="mt-1 text-sm text-amber-900/90 font-medium">
+              Use values directly from your uploaded file to override defaults for each employee.
+              Supported columns: <code>target_bonus_pct</code>, <code>investment_weight</code>, <code>qualitative_weight</code>,
+              <code> investment_score_multiplier</code>, <code>qual_score_multiplier</code>, and <code>mrt_cap_pct</code>.
+              RAF continues to follow the “Use RAF values from input data” switch.
+            </p>
+            <div className="mt-3 bg-white/70 border border-amber-300 rounded-md p-3">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="useRowValuesWhenPresent_top"
+                  checked={!!parameters.useRowValuesWhenPresent}
+                  onChange={(e) => handleChange('useRowValuesWhenPresent', e.target.checked)}
+                  className="mr-3 h-5 w-5 text-amber-600 rounded focus:ring-amber-600"
+                />
+                <span className="text-amber-900 font-semibold">Use row values from the uploaded file when present</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <h2 className="text-xl font-semibold mb-2">Configure Calculation Parameters</h2>
       <p className="text-gray-700 mb-4">Adjust the parameters below to customize how bonuses are calculated.</p>
       
@@ -1011,6 +1049,7 @@ export const BatchParameterConfig: React.FC<BatchParameterConfigProps> = ({
             </div>
           </div>
         </div>
+
         
         {/* BONUS CAPPING SECTION */}
       <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">

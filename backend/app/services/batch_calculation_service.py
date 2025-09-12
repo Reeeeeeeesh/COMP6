@@ -151,10 +151,14 @@ class BatchCalculationService:
                 # For category-based parameters, bonus pool is in the default parameters
                 use_bonus_pool_limit = category_based_params['defaultParameters'].get('useBonusPoolLimit', False)
                 total_bonus_pool = category_based_params['defaultParameters'].get('totalBonusPool')
+                use_row_overrides = category_based_params['defaultParameters'].get('useRowValuesWhenPresent', False)
+                use_direct_raf = category_based_params['defaultParameters'].get('useDirectRaf', True)
             else:
                 # For legacy parameters
                 use_bonus_pool_limit = legacy_parameters.dict().get('useBonusPoolLimit', False)
                 total_bonus_pool = legacy_parameters.dict().get('totalBonusPool')
+                use_row_overrides = legacy_parameters.dict().get('useRowValuesWhenPresent', False)
+                use_direct_raf = legacy_parameters.dict().get('useDirectRaf', True)
             
             # If bonus pool limit is enabled but no pool amount is set, disable it
             if use_bonus_pool_limit and (total_bonus_pool is None or total_bonus_pool <= 0):
@@ -243,10 +247,16 @@ class BatchCalculationService:
                         logger.warning(f"Invalid base salary format for employee {employee.id}: {employee.salary}")
                         continue
                     
-                    # Check if employee has RAF override in additional_data
+                    # Row-level overrides from additional_data
                     raf_override = None
                     is_mrt = False
-                    
+                    row_target_bonus_pct = None
+                    row_inv_weight = None
+                    row_qual_weight = None
+                    row_inv_mult = None
+                    row_qual_mult = None
+                    row_mrt_cap_pct = None
+
                     if employee.additional_data:
                         # Get RAF override and convert to float if it's a string
                         raw_raf = employee.additional_data.get('raf')
@@ -255,11 +265,37 @@ class BatchCalculationService:
                                 raf_override = float(raw_raf)
                             except (ValueError, TypeError):
                                 logger.warning(f"Invalid RAF override for employee {employee.id}: {raw_raf}")
-                        
+
                         # Get MRT flag and ensure it's a boolean
                         raw_is_mrt = employee.additional_data.get('is_mrt', False)
                         is_mrt = bool(raw_is_mrt)
-                    
+
+                        # Only parse row-level overrides when enabled
+                        if use_row_overrides:
+                            def _to_float(value):
+                                try:
+                                    if isinstance(value, str):
+                                        v = value.strip().replace('%', '')
+                                        return float(v)
+                                    return float(value)
+                                except Exception:
+                                    return None
+
+                            row_target_bonus_pct = _to_float(employee.additional_data.get('target_bonus_pct'))
+                            # Interpret >1 as percent form (e.g., 20 => 0.20)
+                            if row_target_bonus_pct is not None and row_target_bonus_pct > 1:
+                                row_target_bonus_pct = row_target_bonus_pct / 100.0
+
+                            row_inv_weight = _to_float(employee.additional_data.get('investment_weight'))
+                            row_qual_weight = _to_float(employee.additional_data.get('qualitative_weight'))
+
+                            row_inv_mult = _to_float(employee.additional_data.get('investment_score_multiplier'))
+                            row_qual_mult = _to_float(employee.additional_data.get('qual_score_multiplier'))
+
+                            row_mrt_cap_pct = _to_float(employee.additional_data.get('mrt_cap_pct'))
+                            if row_mrt_cap_pct is not None and row_mrt_cap_pct > 1:
+                                row_mrt_cap_pct = row_mrt_cap_pct / 100.0
+
                     # Prepare calculation inputs for first pass (without pool limit)
                     if is_category_based:
                         # Use category-aware parameter resolution
@@ -269,21 +305,74 @@ class BatchCalculationService:
                             employee_department=employee.department,
                             employee_position=employee.position,
                             is_mrt=is_mrt,
-                            raf_override=raf_override if raf_override is not None and category_based_params['defaultParameters'].get('useDirectRaf', True) else None,
+                            raf_override=raf_override if (raf_override is not None and use_direct_raf) else None,
                             use_bonus_pool_limit=False  # First pass without pool limit
                         )
+                        # Apply row-level overrides to calculation inputs if enabled
+                        if use_row_overrides:
+                            if row_target_bonus_pct is not None:
+                                calculation_inputs.target_bonus_pct = row_target_bonus_pct
+                            # Weights: if provided, normalize if needed
+                            inv_w = calculation_inputs.investment_weight
+                            qual_w = calculation_inputs.qualitative_weight
+                            if row_inv_weight is not None:
+                                inv_w = row_inv_weight
+                            if row_qual_weight is not None:
+                                qual_w = row_qual_weight
+                            total_w = (inv_w or 0) + (qual_w or 0)
+                            if row_inv_weight is not None or row_qual_weight is not None:
+                                if total_w > 0 and abs(total_w - 1.0) > 0.001:
+                                    inv_w = inv_w / total_w
+                                    qual_w = qual_w / total_w
+                                calculation_inputs.investment_weight = inv_w
+                                calculation_inputs.qualitative_weight = qual_w
+                            if row_inv_mult is not None:
+                                calculation_inputs.investment_score_multiplier = row_inv_mult
+                            if row_qual_mult is not None:
+                                calculation_inputs.qual_score_multiplier = row_qual_mult
+                            if is_mrt and row_mrt_cap_pct is not None:
+                                calculation_inputs.mrt_cap_pct = row_mrt_cap_pct
                     else:
                         # Use legacy universal parameters
+                        # Start with configured parameters
+                        target_bonus_pct = legacy_parameters.targetBonusPct
+                        inv_weight = legacy_parameters.investmentWeight
+                        qual_weight = legacy_parameters.qualitativeWeight
+                        inv_mult = legacy_parameters.investmentScoreMultiplier
+                        qual_mult = legacy_parameters.qualScoreMultiplier
+                        mrt_cap_pct = legacy_parameters.mrtCapPct if is_mrt else None
+
+                        # Apply row-level overrides if enabled
+                        if use_row_overrides:
+                            if row_target_bonus_pct is not None:
+                                target_bonus_pct = row_target_bonus_pct
+                            if row_inv_weight is not None:
+                                inv_weight = row_inv_weight
+                            if row_qual_weight is not None:
+                                qual_weight = row_qual_weight
+                            # Normalize weights if they were overridden and don't sum to 1
+                            if (row_inv_weight is not None) or (row_qual_weight is not None):
+                                total_w = (inv_weight or 0) + (qual_weight or 0)
+                                if total_w > 0 and abs(total_w - 1.0) > 0.001:
+                                    inv_weight = inv_weight / total_w
+                                    qual_weight = qual_weight / total_w
+                            if row_inv_mult is not None:
+                                inv_mult = row_inv_mult
+                            if row_qual_mult is not None:
+                                qual_mult = row_qual_mult
+                            if is_mrt and row_mrt_cap_pct is not None:
+                                mrt_cap_pct = row_mrt_cap_pct
+
                         calculation_inputs = CalculationInputs(
                             base_salary=base_salary,
-                            target_bonus_pct=legacy_parameters.targetBonusPct,
-                            investment_weight=legacy_parameters.investmentWeight,
-                            investment_score_multiplier=legacy_parameters.investmentScoreMultiplier,
-                            qualitative_weight=legacy_parameters.qualitativeWeight,
-                            qual_score_multiplier=legacy_parameters.qualScoreMultiplier,
-                            raf=raf_override if raf_override is not None and legacy_parameters.useDirectRaf else legacy_parameters.raf,
+                            target_bonus_pct=target_bonus_pct,
+                            investment_weight=inv_weight,
+                            investment_score_multiplier=inv_mult,
+                            qualitative_weight=qual_weight,
+                            qual_score_multiplier=qual_mult,
+                            raf=(raf_override if (raf_override is not None and use_direct_raf) else legacy_parameters.raf),
                             is_mrt=is_mrt,
-                            mrt_cap_pct=legacy_parameters.mrtCapPct if is_mrt else None,
+                            mrt_cap_pct=mrt_cap_pct,
                             # No bonus pool limit for first pass
                             use_bonus_pool_limit=False
                         )

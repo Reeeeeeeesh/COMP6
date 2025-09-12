@@ -1,0 +1,123 @@
+# Task ID: 13
+# Title: Implement Scenario Playground Module - Scenario Management and Comparison
+# Status: done
+# Dependencies: 12
+# Priority: medium
+# Description: Complete the scenario management functionality by implementing proper scenario persistence, CRUD operations, and comparison features. Current implementation has basic scenario creation but lacks proper saving, loading, and comparison.
+# Details:
+The backend has scenario models and basic endpoints for creating temporary scenarios from batch uploads. The frontend has a working scenario playground but no persistent scenario management. Need to implement:
+1. Backend scenario DAL and full CRUD endpoints
+2. Frontend scenario management UI
+3. Scenario comparison functionality
+4. Integration with existing playground
+
+Current status:
+✅ Database models (BatchScenario, ScenarioAuditLog)
+✅ Basic endpoints for temporary scenario creation
+✅ Frontend scenario playground
+❌ Persistent scenario storage and management
+❌ Scenario comparison UI
+❌ Full CRUD operations
+
+# Test Strategy:
+1. Unit tests for scenario DAL operations
+2. Integration tests for scenario CRUD endpoints
+3. Frontend tests for scenario management components
+4. End-to-end tests for scenario saving, loading, and comparison
+5. Test scenario versioning and audit trails
+6. Performance tests with multiple scenarios
+
+# Subtasks:
+## 1. Create Scenario DAL (Data Access Layer) [done]
+### Dependencies: None
+### Description: Create scenario_dal.py following the existing pattern from batch_upload_dal.py to handle all database operations for scenarios.
+### Details:
+Create backend/app/dal/scenario_dal.py with methods:
+- create(scenario_data: BatchScenarioCreate)
+- get(scenario_id: str)
+- get_by_session(session_id: str)
+- update(scenario_id: str, updates: BatchScenarioUpdate)
+- delete(scenario_id: str)
+- list_by_session(session_id: str, include_audit_logs: bool = False)
+
+Follow the same pattern as batch_upload_dal.py for consistency.
+
+## 2. Implement Full Scenario CRUD Endpoints [done]
+### Dependencies: 13.1
+### Description: Extend backend/app/routers/scenarios.py to implement proper scenario persistence and CRUD operations.
+### Details:
+Add missing endpoints to scenarios.py:
+- POST /api/v1/scenarios (save scenario - replace temporary implementation)
+- GET /api/v1/scenarios (list scenarios for session)
+- PUT /api/v1/scenarios/{scenario_id} (update scenario)
+- DELETE /api/v1/scenarios/{scenario_id} (delete scenario)
+- POST /api/v1/scenarios/{scenario_id}/duplicate (duplicate scenario)
+
+Update existing endpoints to use proper scenario DAL and persistent storage instead of temporary scenario generation.
+
+## 3. Create Scenario Management Frontend Components [done]
+### Dependencies: 13.2
+### Description: Create frontend components for saving, loading, and managing scenarios.
+### Details:
+Create frontend/src/components/scenario/ScenarioManager.tsx:
+- Save current scenario with name and description
+- List saved scenarios for current session
+- Load selected scenario into playground
+- Delete scenarios
+- Duplicate scenarios
+
+Integrate with existing ScenarioPlayground.tsx component.
+
+## 4. Implement Scenario Comparison Component [done]
+### Dependencies: 13.3
+### Description: Create a component to compare multiple scenarios side by side.
+### Details:
+Create frontend/src/components/scenario/ScenarioComparison.tsx:
+- Select multiple scenarios for comparison
+- Display parameter differences
+- Show calculation result differences
+- Highlight key metrics (total bonus, employee impacts)
+- Export comparison results
+
+Allow access from scenario management interface.
+
+## 5. Add Scenario Versioning and Audit Trail UI [done]
+### Dependencies: 13.4
+### Description: Surface scenario audit logs in the frontend and implement versioning features.
+### Details:
+Extend scenario management to show:
+- Scenario creation and modification history
+- Parameter change tracking
+- User-friendly version display
+- Ability to revert to previous versions
+
+Use existing ScenarioAuditLog model data from backend.
+
+## 6. Update Frontend Services for Full Scenario Management [done]
+### Dependencies: 13.2
+### Description: Extend frontend/src/services/scenarioService.ts to support all new scenario operations.
+### Details:
+Add service methods for:
+- saveScenario(scenarioData, name, description)
+- updateScenario(scenarioId, updates)
+- deleteScenario(scenarioId)
+- listScenarios(sessionId)
+- duplicateScenario(scenarioId, newName)
+- getScenarioAuditLog(scenarioId)
+
+Ensure proper error handling and TypeScript types.
+
+## 7. Integration Testing and Bug Fixes [done]
+### Dependencies: 13.5, 13.6
+### Description: Test the complete scenario management workflow and fix any integration issues.
+### Details:
+Comprehensive testing of:
+- Creating scenarios from batch uploads
+- Saving and loading scenarios
+- Scenario comparison functionality
+- Parameter modification and recalculation
+- Audit trail and versioning
+- Error handling for edge cases
+
+Fix any issues discovered during testing.
+

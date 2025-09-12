@@ -1,17 +1,30 @@
-import React, { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FileUpload } from './FileUpload';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { FileUpload, type FileUploadHandle } from './FileUpload';
 import { FilePreview } from './FilePreview';
 import { UploadProgress } from './UploadProgress';
 import { BatchParameterConfig, BatchParameters } from './BatchParameterConfig';
 import ColumnMappingInterface from './ColumnMappingInterface';
 import { triggerBatchCalculation, getBatchCalculationResults, getBatchUploadStatus, updateBatchParameters } from '../../services/batchCalculationService';
-import { Button, CircularProgress, Box, Typography, LinearProgress } from '@mui/material';
-import { CalculateOutlined } from '@mui/icons-material';
+import { Button, CircularProgress, Box, Typography, LinearProgress, Stepper, Step, StepLabel, Alert, Chip } from '@mui/material';
+import { 
+  CalculateOutlined, 
+  CloudUpload, 
+  DataUsage, 
+  Preview, 
+  Save,
+  CheckCircle,
+  Warning,
+  AutoFixHigh,
+  Settings
+} from '@mui/icons-material';
 import { API_BASE_URL } from '../../config';
 import { NavigationHeader } from '../common/NavigationHeader';
+import { PersonaLayout } from '../common/PersonaLayout';
 import { ErrorDisplay } from '../common/ErrorDisplay';
 import { parseApiError, ErrorItem } from '../../utils/errorHandling';
+import { useUser } from '../../contexts/UserContext';
+import { useTenant } from '../../contexts/TenantContext';
 
 export interface BatchUpload {
   id: string;
@@ -45,11 +58,94 @@ export interface UploadData {
   status: string;
 }
 
+// Enhanced interfaces for guided wizard
+export interface MappingSuggestion {
+  columnName: string;
+  suggestedField: string;
+  confidence: number; // 0-100
+  reasoning: string;
+  alternatives?: { field: string; confidence: number }[];
+}
+
+export interface DataSource {
+  id: string;
+  name: string;
+  description?: string;
+  uploadId: string;
+  columnMapping: Record<string, string>;
+  mappingPreset?: string;
+  createdAt: Date;
+  lastUsed?: Date;
+  rowCount: number;
+  fileInfo: {
+    originalName: string;
+    size: number;
+    type: string;
+  };
+}
+
+export interface MappingPreset {
+  id: string;
+  name: string;
+  description: string;
+  mapping: Record<string, string>;
+  usage_count: number;
+  created_by: string;
+  tenant_id: string;
+}
+
+// Wizard step definitions as specified in implementation plan
+// Canonical wizard steps used consistently across stepper, state, and rendering
+export type WizardStep = 'upload-validation' | 'column-mapping' | 'data-preview' | 'save-source' | 'parameters' | 'calculating';
+
+export interface WizardStepConfig {
+  key: WizardStep;
+  label: string;
+  description: string;
+  icon: React.ComponentType;
+  optional?: boolean;
+}
+
 interface BatchUploadContainerProps {
   sessionId: string;
   onUploadComplete?: (upload: BatchUpload) => void;
   onError?: (error: string) => void;
 }
+
+// Wizard steps configuration as per implementation plan
+const wizardSteps: WizardStepConfig[] = [
+  {
+    key: 'upload-validation',
+    label: 'File Upload & Validation',
+    description: 'Upload your employee data file and validate format',
+    icon: CloudUpload
+  },
+  {
+    key: 'column-mapping',
+    label: 'Intelligent Column Mapping',
+    description: 'AI-powered mapping of columns to system fields',
+    icon: AutoFixHigh
+  },
+  {
+    key: 'data-preview',
+    label: 'Data Preview & Validation',
+    description: 'Review and validate your data before processing',
+    icon: Preview
+  },
+  {
+    key: 'save-source',
+    label: 'Save as Data Source',
+    description: 'Save this configuration for future use',
+    icon: Save
+  },
+  {
+    key: 'parameters',
+    label: 'Configure Parameters',
+    description: 'Set calculation parameters and execute',
+    icon: Settings,
+    optional: true
+  }
+];
 
 export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   sessionId,
@@ -57,21 +153,245 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   onError
 }) => {
   const navigate = useNavigate();
-  const [currentStep, setCurrentStep] = useState<'upload' | 'processing' | 'preview' | 'column-mapping' | 'parameters' | 'calculating'>('upload');
+  const location = useLocation();
+  const { user } = useUser();
+  const { currentTenant } = useTenant();
+  
+  // Wizard state
+  const [currentStep, setCurrentStep] = useState<WizardStep>('upload-validation');
+  const [completedSteps, setCompletedSteps] = useState<Set<WizardStep>>(new Set());
+  const [stepData, setStepData] = useState<Record<string, any>>({});
+  
+  // Upload state
   const [uploadData, setUploadData] = useState<UploadData | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
   const [errors, setErrors] = useState<ErrorItem[]>([]);
-  const [parameters, setParameters] = useState<BatchParameters | null>(null);
+  
+  // AI Column mapping state
+  const [mappingSuggestions, setMappingSuggestions] = useState<MappingSuggestion[]>([]);
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
+  const [mappingConfidence, setMappingConfidence] = useState<number>(0);
+  const [availablePresets, setAvailablePresets] = useState<MappingPreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [isLoadingMappings, setIsLoadingMappings] = useState(false);
+  
+  // Data source state
+  const [dataSourceName, setDataSourceName] = useState<string>('');
+  const [dataSourceDescription, setDataSourceDescription] = useState<string>('');
+  const [savedDataSource, setSavedDataSource] = useState<DataSource | null>(null);
+  
+  // Parameters and calculation state
+  const [parameters, setParameters] = useState<BatchParameters | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [calculationProgress, setCalculationProgress] = useState<number>(0);
+
+  // Refs: upload section for scrolling and FileUpload imperative handle
+  const uploadSectionRef = useRef<HTMLDivElement | null>(null);
+  const mappingSectionRef = useRef<HTMLDivElement | null>(null);
+  const paramsSectionRef = useRef<HTMLDivElement | null>(null);
+  const globalFileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileUploadRef = useRef<FileUploadHandle | null>(null);
+  // Ensure we only auto-open the file dialog once per page load when using ?browse=1
+  const hasAutoOpenedBrowseRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    // Smoothly bring the active section into view when step changes
+    requestAnimationFrame(() => {
+      if (currentStep === 'upload-validation') {
+        uploadSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (currentStep === 'column-mapping') {
+        mappingSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (currentStep === 'parameters') {
+        paramsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }, [currentStep]);
+
+  // Safety net: if a later step is active but prerequisites are missing, return to upload
+  useEffect(() => {
+    if ((currentStep === 'column-mapping' || currentStep === 'parameters' || currentStep === 'data-preview') && !uploadData) {
+      console.log('Safety net: Returning to upload-validation because uploadData is missing');
+      setCurrentStep('upload-validation');
+    }
+    if (currentStep === 'calculating' && (!uploadData || !parameters)) {
+      console.log('Safety net: Returning to upload-validation because calculation prerequisites are missing');
+      setCurrentStep('upload-validation');
+    }
+  }, [currentStep, uploadData, parameters]);
+
+  // If navigated with ?browse=1, auto-open the file dialog (ONCE) for clarity
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldBrowse = params.get('browse');
+    const stepParam = params.get('step');
+    console.log('URL params check:', { shouldBrowse, stepParam, uploadData: !!uploadData });
+    
+    if (!hasAutoOpenedBrowseRef.current && shouldBrowse && (shouldBrowse === '1' || shouldBrowse === 'true')) {
+      console.log('Auto-opening file dialog due to browse parameter');
+      setCurrentStep('upload-validation');
+      setTimeout(() => {
+        openUploadStepAndDialog();
+      }, 0);
+      // Prevent re-opening on subsequent re-renders by removing the param
+      hasAutoOpenedBrowseRef.current = true;
+      params.delete('browse');
+      const nextSearch = params.toString();
+      // Replace the URL so back button behavior remains sane
+      navigate({ pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' }, { replace: true });
+    }
+    // Deep-link to a specific wizard step if requested and data is present
+    // TEMPORARILY DISABLED - this might be forcing parameters step
+    /*
+    if (stepParam) {
+      if (stepParam === 'mapping' && uploadData) {
+        console.log('Setting step to column-mapping due to URL parameter');
+        setCurrentStep('column-mapping');
+      } else if (stepParam === 'parameters' && uploadData) {
+        console.log('Setting step to parameters due to URL parameter');
+        setCurrentStep('parameters');
+      }
+    }
+    */
+  }, [location.search, uploadData]);
+
+  // Navigate to the upload step and (after render) open the file dialog
+  const openUploadStepAndDialog = () => {
+    if (!canNavigateToStep('upload-validation')) return;
+    // If we're already on the upload step, open synchronously to preserve user gesture
+    if (currentStep === 'upload-validation') {
+      uploadSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      fileUploadRef.current?.open();
+      return;
+    }
+    // Navigate to the upload step first; attempt to open immediately if ref is already mounted
+    setCurrentStep('upload-validation');
+    uploadSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (fileUploadRef.current) {
+      fileUploadRef.current.open();
+    }
+  };
+
+  // Wizard navigation helpers
+  const getCurrentStepIndex = () => {
+    const idx = wizardSteps.findIndex(step => step.key === currentStep);
+    return idx >= 0 ? idx : 0; // Fallback to first step to avoid blocking navigation
+  };
+  const isStepCompleted = (step: WizardStep) => completedSteps.has(step);
+  // Check prerequisites per step to prevent confusing no-op clicks
+  const stepPrereqsMet = (step: WizardStep) => {
+    if (step === 'column-mapping') return !!uploadData;
+    if (step === 'data-preview') return !!uploadData;
+    if (step === 'parameters') return !!uploadData; // mapping is optional; parameters can still be viewed
+    if (step === 'calculating') return !!uploadData && !!parameters;
+    return true;
+  };
+  const canNavigateToStep = (step: WizardStep) => {
+    const stepIndex = wizardSteps.findIndex(s => s.key === step);
+    const currentIndex = getCurrentStepIndex();
+    
+    if (stepIndex < 0) return false;
+    
+    // Check if prerequisites are met first
+    const prereqsMet = stepPrereqsMet(step);
+    if (!prereqsMet) return false;
+    
+    // Allow navigation to:
+    // 1. Current step (always allow re-activation of current step)
+    // 2. Any previous step (go back)
+    // 3. Any completed step (re-visit completed steps)
+    // 4. Next immediate step (if current step is completed)
+    // 5. Special case: column-mapping is always available after upload
+    const isCurrentStep = step === currentStep;
+    const isPreviousStep = stepIndex < currentIndex;
+    const isCompletedStep = isStepCompleted(step);
+    const isNextStep = stepIndex === currentIndex + 1;
+    const currentStepCompleted = isStepCompleted(currentStep);
+    const isColumnMappingWithUpload = step === 'column-mapping' && !!uploadData;
+    
+    return isCurrentStep || isPreviousStep || isCompletedStep || 
+           (isNextStep && currentStepCompleted) || isColumnMappingWithUpload;
+  };
+
+  const markStepCompleted = (step: WizardStep) => {
+    setCompletedSteps(prev => new Set([...prev, step]));
+  };
+
+  const navigateToStep = (step: WizardStep) => {
+    if (canNavigateToStep(step)) {
+      setCurrentStep(step);
+    }
+  };
+
+  // Mock AI column mapping service (in real app, this would call the backend)
+  const generateColumnMappingSuggestions = async (columns: ColumnInfo[]): Promise<MappingSuggestion[]> => {
+    setIsLoadingMappings(true);
+    
+    // Simulate API call delay
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // Mock AI suggestions based on column names
+    const suggestions: MappingSuggestion[] = columns.map(column => {
+      const name = column.name.toLowerCase();
+      let suggestedField = 'unknown';
+      let confidence = 50;
+      let reasoning = 'Based on column name analysis';
+
+      // Simple rule-based mapping (in real app, this would be ML-based)
+      if (name.includes('name') || name.includes('employee')) {
+        suggestedField = 'employee_name';
+        confidence = 95;
+        reasoning = 'Strong match for employee name based on column header';
+      } else if (name.includes('salary') || name.includes('base')) {
+        suggestedField = 'base_salary';
+        confidence = 90;
+        reasoning = 'High confidence match for salary field';
+      } else if (name.includes('department') || name.includes('dept')) {
+        suggestedField = 'department';
+        confidence = 85;
+        reasoning = 'Department field identified from column name';
+      } else if (name.includes('performance') || name.includes('rating')) {
+        suggestedField = 'performance_rating';
+        confidence = 80;
+        reasoning = 'Performance metric detected';
+      } else if (name.includes('id') || name.includes('emp')) {
+        suggestedField = 'employee_id';
+        confidence = 75;
+        reasoning = 'Likely employee identifier';
+      } else if (name.includes('date') || name.includes('hired')) {
+        suggestedField = 'hire_date';
+        confidence = 70;
+        reasoning = 'Date field detected';
+      }
+
+      return {
+        columnName: column.name,
+        suggestedField,
+        confidence,
+        reasoning,
+        alternatives: suggestedField !== 'unknown' ? [
+          { field: 'skip', confidence: 10 },
+          { field: 'custom', confidence: 5 }
+        ] : []
+      };
+    });
+
+    setIsLoadingMappings(false);
+    return suggestions;
+  };
+
+  // Calculate overall mapping confidence
+  const calculateMappingConfidence = (suggestions: MappingSuggestion[]): number => {
+    if (suggestions.length === 0) return 0;
+    const avgConfidence = suggestions.reduce((sum, s) => sum + s.confidence, 0) / suggestions.length;
+    return Math.round(avgConfidence);
+  };
 
   const handleFileSelect = useCallback(async (file: File) => {
     console.log('Starting file upload process with file:', file.name, 'size:', file.size);
     setErrors([]);
     setIsUploading(true);
-    setCurrentStep('processing');
+    // Keep current step at 'upload-validation' while showing progress
     setUploadProgress(0);
 
     try {
@@ -147,8 +467,13 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       }
 
       if (columnsResult.success) {
+        console.log('Upload successful, setting uploadData and advancing to column-mapping');
         setUploadData(columnsResult.data);
-        setCurrentStep('parameters');
+        // Mark upload step as completed
+        setCompletedSteps(prev => new Set([...prev, 'upload-validation']));
+        // FORCE advance to column mapping - this is the critical fix
+        console.log('FORCING current step to column-mapping');
+        setCurrentStep('column-mapping');
         onUploadComplete?.(upload);
       } else {
         throw new Error(columnsResult?.error || 'Failed to get column information');
@@ -159,7 +484,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       const parsed = parseApiError(err);
       console.error('Setting error messages:', parsed.errors);
       setErrors(parsed.errors);
-      setCurrentStep('upload');
+      setCurrentStep('upload-validation');
       onError?.(parsed.summary);
     } finally {
       console.log('Upload process completed (success or failure)');
@@ -168,7 +493,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   }, [sessionId, onUploadComplete, onError]);
 
   const handleReset = useCallback(() => {
-    setCurrentStep('upload');
+    setCurrentStep('upload-validation');
     setUploadData(null);
     setUploadProgress(0);
     setIsUploading(false);
@@ -606,50 +931,163 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   }, [uploadData, parameters, navigate]);
 
   return (
-    <div>
-      <NavigationHeader title="Batch Processing" />
-      <div className="bg-white rounded-lg shadow p-6">
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Batch Processing</h2>
+    <PersonaLayout
+      title="Guided Data Upload Wizard"
+      breadcrumbs={[
+        { label: 'Data Hub', path: '/batch' },
+        { label: 'Upload Wizard', path: '/batch/upload' }
+      ]}
+      actions={
+        <div className="flex items-center space-x-3">
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => globalFileInputRef.current?.click()}
+            startIcon={<CloudUpload />}
+            aria-label="Browse files to upload"
+          >
+            Browse Files
+          </Button>
+          {savedDataSource && (
+            <Chip 
+              icon={<CheckCircle />}
+              label={`Saved: ${savedDataSource.name}`}
+              color="success"
+              variant="outlined"
+            />
+          )}
         </div>
-        <div className="flex items-center mb-6">
-          <div className={`flex items-center ${currentStep === 'upload' ? 'text-blue-600' : 'text-gray-500'}`}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
-              <span className="text-sm font-medium">1</span>
+      }
+    >
+      
+      <div className="max-w-4xl mx-auto">
+        {/* Debug: Current Step Display */}
+        <div className="mb-4 p-2 bg-blue-50 border border-blue-200 rounded text-sm">
+          <strong>Debug:</strong> Current Step: <code>{currentStep}</code> | Upload Data: <code>{uploadData ? 'Available' : 'None'}</code> | Completed Steps: <code>{Array.from(completedSteps).join(', ')}</code>
+        </div>
+        {/* Keep header CTA; remove duplicate inline CTA to reduce clutter */}
+        
+        {/* Enhanced Wizard Stepper */}
+        <div className="mb-8">
+      <Stepper 
+        activeStep={getCurrentStepIndex()} 
+        alternativeLabel
+        nonLinear
+        className="mb-6"
+      >
+        {wizardSteps.map((step, index) => {
+          const Icon = step.icon;
+          const isCompleted = isStepCompleted(step.key);
+          const isCurrent = currentStep === step.key;
+          const allowed = canNavigateToStep(step.key);
+          const disabledHint = !stepPrereqsMet(step.key)
+            ? (step.key === 'column-mapping' || step.key === 'data-preview')
+              ? 'Upload a file first to map columns'
+              : step.key === 'parameters'
+                ? 'Upload a file before configuring parameters'
+                : step.key === 'calculating'
+                  ? 'Set parameters before calculating'
+                  : undefined
+            : undefined;
+          
+          return (
+            <Step 
+              key={step.key}
+              completed={isCompleted}
+              sx={{ 
+                cursor: allowed ? 'pointer' : 'not-allowed',
+                '& .MuiStepLabel-root': {
+                  flexDirection: 'column',
+                }
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  console.log(`Clicking step: ${step.key}, allowed: ${allowed}`);
+                  if (!allowed) return;
+                  if (step.key === 'upload-validation') {
+                    openUploadStepAndDialog();
+                  } else {
+                    console.log(`Navigating to step: ${step.key}`);
+                    navigateToStep(step.key);
+                  }
+                }}
+                className={`flex flex-col items-center bg-transparent border-0 p-0 m-0 focus:outline-none ${allowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                title={disabledHint}
+                aria-label={`Go to step: ${step.label}`}
+              >
+                <div className={`
+                  w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all
+                  ${isCurrent 
+                        ? 'border-blue-500 bg-blue-50 text-blue-600' 
+                        : isCompleted 
+                          ? 'border-green-500 bg-green-50 text-green-600'
+                          : 'border-gray-300 bg-gray-50 text-gray-400'
+                      }
+                    `}>
+                      {isCompleted ? (
+                        <CheckCircle className="w-6 h-6" />
+                      ) : (
+                        <Icon className="w-6 h-6" />
+                      )}
+                    </div>
+                    <div className="text-center mt-2">
+                      <div className={`font-medium ${isCurrent ? 'text-blue-600' : 'text-gray-700'}`}>
+                        {step.label}
+                      </div>
+                      <div className="text-sm text-gray-500 mt-1 max-w-32">
+                        {step.description}
+                      </div>
+                      {step.optional && (
+                        <Chip label="Optional" size="small" variant="outlined" className="mt-1" />
+                      )}
+                    </div>
+                  </button>
+                </Step>
+              );
+            })}
+          </Stepper>
+
+          {/* Overall Progress Indicator */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-gray-700">Overall Progress</span>
+              <span className="text-sm text-gray-600">
+                {completedSteps.size} of {wizardSteps.length} steps completed
+              </span>
             </div>
-            <span className="font-medium">Upload File</span>
+            <LinearProgress 
+              variant="determinate" 
+              value={(completedSteps.size / wizardSteps.length) * 100}
+              className="h-2 rounded-full"
+            />
+            {/* Reduce duplication: keep descriptive text only; use header Browse action */}
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Select a CSV file to begin or replace your upload.
+              </div>
+            </div>
           </div>
-          <div className="flex-1 h-px bg-gray-300 mx-4"></div>
-          <div className={`flex items-center ${currentStep === 'processing' ? 'text-blue-600' : 'text-gray-500'}`}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
-              <span className="text-sm font-medium">2</span>
-            </div>
-            <span className="font-medium">Processing</span>
-          </div>
-          <div className="flex-1 h-px bg-gray-300 mx-4"></div>
-          <div className={`flex items-center ${currentStep === 'preview' ? 'text-blue-600' : 'text-gray-500'}`}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
-              <span className="text-sm font-medium">3</span>
-            </div>
-            <span className="font-medium">Preview & Validate</span>
-          </div>
-          <div className="flex-1 h-px bg-gray-300 mx-4"></div>
-          <div className={`flex items-center ${currentStep === 'column-mapping' ? 'text-blue-600' : 'text-gray-500'}`}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
-              <span className="text-sm font-medium">4</span>
-            </div>
-            <span className="font-medium">Map Columns</span>
-          </div>
-          <div className="flex-1 h-px bg-gray-300 mx-4"></div>
-          <div className={`flex items-center ${currentStep === 'parameters' ? 'text-blue-600' : 'text-gray-500'}`}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-current mr-2">
-              <span className="text-sm font-medium">5</span>
-            </div>
-            <span className="font-medium">Configure Parameters</span>
+
+          {/* Hidden input for header Browse action */}
+          <div className="mt-4">
+            <input
+              ref={globalFileInputRef}
+              type="file"
+              accept=".csv,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                  const f = files[0];
+                  handleFileSelect(f);
+                  e.currentTarget.value = '';
+                }
+              }}
+            />
           </div>
         </div>
-      </div>
 
       {/* Error Display */}
       {errors.length > 0 && (
@@ -670,7 +1108,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
             <button
               onClick={() => {
                 setErrors([]);
-                setCurrentStep('upload');
+                setCurrentStep('upload-validation');
                 setUploadData(null);
                 setUploadProgress(0);
                 setIsUploading(false);
@@ -684,15 +1122,19 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       )}
 
       {/* Content based on current step */}
-      {currentStep === 'upload' && (
-        <FileUpload
-          onFileSelect={handleFileSelect}
-          disabled={isUploading}
-          sessionId={sessionId}
-        />
+      {(!uploadData || currentStep === 'upload-validation') && (
+        <div ref={uploadSectionRef} className="mb-8" data-testid="upload-section">
+          <FileUpload
+            ref={fileUploadRef}
+            onFileSelect={handleFileSelect}
+            disabled={isUploading}
+            sessionId={sessionId}
+          />
+          {/* Remove extra Browse button under dropzone to avoid repetition; header CTA remains */}
+        </div>
       )}
 
-      {currentStep === 'processing' && (
+      {isUploading && (
         <UploadProgress
           progress={uploadProgress}
           isComplete={uploadProgress === 100}
@@ -700,19 +1142,32 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
         />
       )}
 
-      {currentStep === 'column-mapping' && uploadData && (
-        <ColumnMappingInterface
-          columns={uploadData.columns}
-          onMappingComplete={(mapping) => {
-            setColumnMapping(mapping);
-            setCurrentStep('parameters');
-          }}
-          onCancel={handleReset}
-        />
+      {(currentStep === 'column-mapping' || (uploadData && !completedSteps.has('column-mapping') && currentStep !== 'upload-validation')) && (
+        <div ref={mappingSectionRef}>
+          <div className="mb-4 p-2 bg-green-50 border border-green-200 rounded text-sm">
+            <strong>Column Mapping Section FORCED ACTIVE:</strong> currentStep={currentStep}, uploadData={uploadData ? 'YES' : 'NO'}, columns={uploadData?.columns?.length || 0}
+          </div>
+          {uploadData ? (
+            <ColumnMappingInterface
+              columns={uploadData.columns}
+              onMappingComplete={(mapping) => {
+                console.log('Column mapping completed:', mapping);
+                setColumnMapping(mapping);
+                setCompletedSteps(prev => new Set([...prev, 'column-mapping']));
+                setCurrentStep('parameters');
+              }}
+              onCancel={handleReset}
+            />
+          ) : (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
+              Please upload a file before mapping columns.
+            </div>
+          )}
+        </div>
       )}
 
       {currentStep === 'parameters' && uploadData && (
-        <div>
+        <div ref={paramsSectionRef}>
           <BatchParameterConfig 
             uploadId={uploadData.upload_id}
             onParametersChange={handleParametersUpdate}
@@ -732,7 +1187,7 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
         </div>
       )}
 
-      {currentStep === 'preview' && uploadData && (
+      {currentStep === 'data-preview' && uploadData && (
         <FilePreview
           uploadData={uploadData}
           onReset={handleReset}
@@ -830,6 +1285,6 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
         </div>
       )}
       </div>
-    </div>
+    </PersonaLayout>
   );
 };

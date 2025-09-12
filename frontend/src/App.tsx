@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // Add useState, useEffect
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useParams } from 'react-router-dom';
 import './App.css';
 import { BatchUploadContainer } from './components/batch/BatchUploadContainer';
@@ -8,12 +8,38 @@ import { ScenarioPlayground } from './components/scenario/ScenarioPlayground';
 import UserGuide from './components/UserGuide';
 import QuickStartDemo from './components/QuickStartDemo';
 import { Dashboard } from './components/dashboard/Dashboard';
+import PersonaDashboard from './components/dashboard/PersonaDashboard';
+import { TestPersonaDashboard } from './TestComponent';
 import { PageTransition } from './components/common/PageTransition';
-import { API_BASE_URL } from './config'; // Import API_BASE_URL for consistent API calls
+import { API_BASE_URL } from './config';
 import RevenueBandingAdmin from './components/admin/RevenueBandingAdmin';
 import PlanBuilderMain from './components/admin/PlanBuilderMain';
 import { ExecutiveReporting } from './components/admin/ExecutiveReporting';
 import { CalculationTapeViewer } from './components/admin/CalculationTapeViewer';
+
+// Import Plan Studio components
+import PlanLibrary from './components/plans/PlanLibrary';
+import PlanStudio from './components/plans/PlanStudio';
+
+// Import Approval Workflow components
+import ApprovalDashboard from './components/approvals/ApprovalDashboard';
+import ApprovalWorkflowViewer from './components/approvals/ApprovalWorkflowViewer';
+
+// Import new contexts and hooks
+import { UserContextProvider, useUser, UserRole } from './contexts/UserContext';
+import { TenantContextProvider, useTenant } from './contexts/TenantContext';
+import { useApi } from './hooks/useApi';
+
+// Role-based route mapping as specified in implementation plan
+const roleRoutes: Record<UserRole, string[]> = {
+  analyst: ['/data-hub', '/plan-studio', '/plans', '/approvals', '/scenarios', '/batch', '/calculator', '/dashboard'],
+  executive: ['/dashboard', '/reporting', '/approvals', '/summaries', '/admin/executive-reporting'],
+  admin: ['/users', '/platform', '/plans', '/plan-studio', '/approvals', '/revenue-banding', '/admin/revenue-banding', '/admin/plan-builder', '/admin/executive-reporting', '/dashboard', '/batch']
+};
+
+// Import RoleGuard component
+import { RoleGuard } from './components/common/RoleGuard';
+import MappingStudioPage from './components/batch/MappingStudioPage';
 
 // Wrapper component for calculation tape viewer with URL parameters
 const CalculationTapeViewerPage = () => {
@@ -26,9 +52,15 @@ const CalculationTapeViewerPage = () => {
   return <CalculationTapeViewer planId={planId} runId={runId} />;
 };
 
-function App() {
+// Main App component with routing logic
+const AppContent: React.FC = () => {
   const [sessionId, setSessionId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
+  const { user, isLoading: userLoading } = useUser();
+  const { currentTenant, getTenantHeader } = useTenant();
+  
+  // Initialize API client with tenant context
+  useApi();
 
   // Initialize session on app load
   useEffect(() => {
@@ -87,12 +119,19 @@ function App() {
     // Show error message to user
   };
 
-  if (isLoading) {
+  if (isLoading || userLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Initializing application...</p>
+          <p className="text-gray-600">
+            {userLoading ? 'Loading user profile...' : 'Initializing application...'}
+          </p>
+          {currentTenant && (
+            <p className="text-sm text-gray-500 mt-2">
+              Tenant: {currentTenant.displayName}
+            </p>
+          )}
         </div>
       </div>
     );
@@ -107,6 +146,13 @@ function App() {
         <Router>
           <Routes key={isLoading ? 'loading-routes' : 'loaded-routes'}>
             <Route path="/" element={
+              <PageTransition>
+                <PersonaDashboard />
+              </PageTransition>
+            } />
+            
+            {/* Legacy landing page - keep for reference/fallback */}
+            <Route path="/legacy-home" element={
               <PageTransition>
                 <div className="max-w-4xl mx-auto">
                   <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-8 mb-8">
@@ -165,7 +211,7 @@ function App() {
                       <div className="text-sm text-gray-500 mb-4 font-medium">
                         ⏱️ ~3 minutes • Best for: 10+ employees
                       </div>
-                      <Link to="/batch">
+                      <Link to="/batch?browse=1">
                         <button
                           className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-300 transform group-hover:scale-105"
                         >
@@ -236,24 +282,292 @@ function App() {
                 </div>
               </PageTransition>
             } />
-            <Route path="/dashboard" element={<PageTransition><Dashboard sessionId={sessionId} /></PageTransition>} />
-            <Route path="/batch" element={<PageTransition><BatchUploadContainer sessionId={sessionId} onUploadComplete={handleUploadComplete} onError={handleUploadError} /></PageTransition>} />
-            <Route path="/batch/:uploadId/results" element={<PageTransition><BatchResultsDisplay /></PageTransition>} />
-            <Route path="/batch/:uploadId/results/:resultId" element={<PageTransition><BatchResultsDisplay /></PageTransition>} />
-            <Route path="/calculator" element={<PageTransition><div className="max-w-4xl mx-auto"><p className="text-center p-8 text-gray-500">Please select an employee from batch results to use the calculator.</p></div></PageTransition>} />
-            <Route path="/calculator/:resultId" element={<PageTransition><CalculatorContainer /></PageTransition>} />
-            <Route path="/scenarios" element={<PageTransition><ScenarioPlayground sessionId={sessionId} onError={handleUploadError} /></PageTransition>} />
+            
+            {/* Persona selection page for role switching */}
+            <Route path="/personas" element={
+              <PageTransition>
+                <PersonaDashboard />
+              </PageTransition>
+            } />
+            
+            {/* Dashboard - All roles */}
+            <Route path="/dashboard" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <Dashboard sessionId={sessionId} />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            
+            {/* Plan Studio - Analyst and Admin */}
+            <Route path="/plans" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <PlanLibrary mode="library" />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/plans/templates" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <PlanLibrary mode="templates" />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/plans/shared" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <PlanLibrary mode="shared" />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/plans/create" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <PlanStudio />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/plans/:planId" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <PlanStudio />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/plans/:planId/edit" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <PlanStudio />
+                </RoleGuard>
+              </PageTransition>
+            } />
+
+            {/* Column Mapping Studio - Analyst and Admin */}
+            <Route path="/mapping-studio" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <MappingStudioPage sessionId={sessionId} />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            
+            {/* Approval Workflows - Analyst, Executive, and Admin */}
+            <Route path="/approvals" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <ApprovalDashboard />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/approvals/:workflowId" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <ApprovalWorkflowViewer />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            
+            {/* Batch operations - Analyst and Admin */}
+            <Route path="/batch" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <BatchUploadContainer 
+                    sessionId={sessionId} 
+                    onUploadComplete={handleUploadComplete} 
+                    onError={handleUploadError} 
+                  />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/batch/upload" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <BatchUploadContainer 
+                    sessionId={sessionId} 
+                    onUploadComplete={handleUploadComplete} 
+                    onError={handleUploadError} 
+                  />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/batch/:uploadId/results" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <BatchResultsDisplay />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/batch/:uploadId/results/:resultId" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <BatchResultsDisplay />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            
+            {/* Calculator - Analyst and Admin */}
+            <Route path="/calculator" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <div className="max-w-4xl mx-auto">
+                    <p className="text-center p-8 text-gray-500">
+                      Please select an employee from batch results to use the calculator.
+                    </p>
+                  </div>
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/calculator/:resultId" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <CalculatorContainer />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            
+            {/* Scenarios - Analyst and Admin */}
+            <Route path="/scenarios" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                  fallback="redirect"
+                  redirectTo="/"
+                >
+                  <ScenarioPlayground sessionId={sessionId} onError={handleUploadError} />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            
+            {/* Guide pages - All users */}
             <Route path="/user-guide" element={<PageTransition><QuickStartDemo /></PageTransition>} />
             <Route path="/advanced-guide" element={<PageTransition><UserGuide /></PageTransition>} />
-            <Route path="/admin/revenue-banding" element={<PageTransition><RevenueBandingAdmin /></PageTransition>} />
-            <Route path="/admin/plan-builder" element={<PageTransition><PlanBuilderMain /></PageTransition>} />
-            <Route path="/admin/executive-reporting" element={<PageTransition><ExecutiveReporting tenantId="default" /></PageTransition>} />
-            <Route path="/admin/calculation-tape/:planId/:runId" element={<PageTransition><CalculationTapeViewerPage /></PageTransition>} />
+            
+            {/* Admin routes - Admin only */}
+            <Route path="/admin/revenue-banding" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['admin'] }}
+                  fallback="show-message"
+                  errorMessage="Revenue banding configuration requires administrator privileges."
+                >
+                  <RevenueBandingAdmin />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/admin/plan-builder" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['admin'] }}
+                  fallback="show-message"
+                  errorMessage="Plan builder access requires administrator privileges."
+                >
+                  <PlanBuilderMain />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/admin/executive-reporting" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['executive', 'admin'] }}
+                  fallback="show-message"
+                  errorMessage="Executive reporting requires executive or administrator access."
+                >
+                  <ExecutiveReporting tenantId={getTenantHeader()} />
+                </RoleGuard>
+              </PageTransition>
+            } />
+            <Route path="/admin/calculation-tape/:planId/:runId" element={
+              <PageTransition>
+                <RoleGuard 
+                  require={{ type: 'role', roles: ['admin'] }}
+                  fallback="redirect"
+                  redirectTo="/dashboard"
+                >
+                  <CalculationTapeViewerPage />
+                </RoleGuard>
+              </PageTransition>
+            } />
           </Routes>
         </Router>
 
       </div>
     </div>
+  );
+};
+
+// Main App wrapper with context providers
+function App() {
+  return (
+    <TenantContextProvider>
+      <UserContextProvider>
+        <AppContent />
+      </UserContextProvider>
+    </TenantContextProvider>
   );
 }
 

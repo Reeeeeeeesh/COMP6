@@ -1,0 +1,248 @@
+# Task ID: 9
+# Title: Implement Individual Compensation Calculator - Input Panel and Real-time Calculation
+# Status: done
+# Dependencies: 3, 8
+# Priority: medium
+# Description: Develop the input panel for the Individual Compensation Calculator with real-time bonus calculation updates.
+# Details:
+1. Create frontend components:
+   - InputPanel.tsx: Form for adjusting individual compensation parameters
+   - ResultsPanel.tsx: Display of calculation results
+2. Implement state management for input parameters
+3. Create real-time calculation updates using the frontend calculation engine
+4. Implement input controls for all compensation components:
+   - Base Salary & Target Bonus %
+   - Investment Performance Component (Score Multiplier and Weight)
+   - Qualitative Performance Component (Score Multiplier and Weight)
+   - Revenue Adjustment Factor (RAF)
+   - Policy & Cap Adjustments
+5. Add validation for input values
+
+Example input panel component:
+```typescript
+const InputPanel: React.FC<{
+  initialData: EmployeeData;
+  globalParameters: BatchParameters;
+  onChange: (data: EmployeeData) => void;
+}> = ({ initialData, globalParameters, onChange }) => {
+  const [data, setData] = useState<EmployeeData>(initialData);
+  
+  // Update parent component when data changes
+  useEffect(() => {
+    onChange(data);
+  }, [data, onChange]);
+  
+  const handleChange = (field: keyof EmployeeData, value: any) => {
+    setData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+  
+  return (
+    <div className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Compensation Inputs</h2>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Employee Info Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Employee Information</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Employee ID</label>
+            <input
+              type="text"
+              value={data.employee_id || ''}
+              disabled
+              className="p-2 border rounded w-full bg-gray-100"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Name</label>
+            <input
+              type="text"
+              value={data.name || ''}
+              disabled
+              className="p-2 border rounded w-full bg-gray-100"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Team</label>
+            <input
+              type="text"
+              value={data.team || ''}
+              disabled
+              className="p-2 border rounded w-full bg-gray-100"
+            />
+          </div>
+        </div>
+        
+        {/* Base Compensation Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Base Compensation</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Base Salary (£)</label>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              value={data.base_salary || 0}
+              onChange={(e) => handleChange('base_salary', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Target Bonus %</label>
+            <input
+              type="number"
+              min="0"
+              max="2"
+              step="0.01"
+              value={data.target_bonus_pct || globalParameters.targetBonusPct || 0}
+              onChange={(e) => handleChange('target_bonus_pct', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+        </div>
+        
+        {/* Investment Performance Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Investment Performance</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Investment Score Multiplier</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={data.investment_score_multiplier || 1}
+              onChange={(e) => handleChange('investment_score_multiplier', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Investment Weight</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={data.investment_weight || globalParameters.investmentWeight || 0.6}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                handleChange('investment_weight', value);
+                handleChange('qualitative_weight', 1 - value);
+              }}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs">
+              <span>0%</span>
+              <span>{((data.investment_weight || globalParameters.investmentWeight || 0.6) * 100).toFixed(0)}%</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Qualitative Performance Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Qualitative Performance</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Qualitative Score Multiplier</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={data.qual_score_multiplier || 1}
+              onChange={(e) => handleChange('qual_score_multiplier', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">Qualitative Weight</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={data.qualitative_weight || globalParameters.qualitativeWeight || 0.4}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                handleChange('qualitative_weight', value);
+                handleChange('investment_weight', 1 - value);
+              }}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs">
+              <span>0%</span>
+              <span>{((data.qualitative_weight || globalParameters.qualitativeWeight || 0.4) * 100).toFixed(0)}%</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* RAF Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Revenue Adjustment Factor (RAF)</h3>
+          
+          <div className="mb-2">
+            <label className="block text-sm mb-1">RAF Value</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={data.raf || 1}
+              onChange={(e) => handleChange('raf', Number(e.target.value))}
+              className="p-2 border rounded w-full"
+            />
+          </div>
+        </div>
+        
+        {/* Policy Settings Section */}
+        <div className="mb-4">
+          <h3 className="font-bold mb-2">Policy Settings</h3>
+          
+          <div className="mb-2 flex items-center">
+            <input
+              type="checkbox"
+              checked={data.is_mrt || false}
+              onChange={(e) => handleChange('is_mrt', e.target.checked)}
+              className="mr-2"
+              id="is_mrt"
+            />
+            <label htmlFor="is_mrt" className="text-sm">Material Risk Taker (MRT)</label>
+          </div>
+          
+          {data.is_mrt && (
+            <div className="mb-2">
+              <label className="block text-sm mb-1">MRT Cap %</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={data.mrt_cap_pct || globalParameters.mrtCapPct || 1}
+                onChange={(e) => handleChange('mrt_cap_pct', Number(e.target.value))}
+                className="p-2 border rounded w-full"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for input panel component
+2. Integration tests for real-time calculation updates
+3. Test input validation and constraints
+4. Verify calculation accuracy using test cases from the truth table
+5. Test performance of real-time updates
+6. Validate handling of edge cases and invalid inputs

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BarChart,
   Bar,
@@ -14,6 +14,9 @@ import {
   LineChart,
   Line
 } from 'recharts';
+import { Switch, FormControlLabel, Box, Tooltip as MuiTooltip } from '@mui/material';
+import { AdvancedVisualizationLibrary, VisualizationData } from '../visualization/AdvancedVisualizationLibrary';
+import { InteractiveHeatmap, HeatmapDataPoint } from '../visualization/InteractiveHeatmap';
 
 interface CalculationSummary {
   totalEmployees: number;
@@ -54,6 +57,8 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
   title = "Scenario Visualizations",
   showTitle = true
 }) => {
+  const [useAdvancedVisualizations, setUseAdvancedVisualizations] = useState(false);
+  
   // Debug log the complete scenario results first
   console.log('Complete Scenario Results:', scenarioResults);
   
@@ -74,6 +79,81 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
   
   const departmentBreakdown = hasDepartmentData ? scenarioResults.departmentBreakdown : getDemoData();
   console.log('Using Department Breakdown:', departmentBreakdown);
+
+  // Convert scenario data to advanced visualization format
+  const convertDepartmentDataToAdvanced = (): VisualizationData[] => {
+    return Object.entries(departmentBreakdown)
+      .map(([department, data]) => ({
+        name: department,
+        value: data.totalBonus,
+        category: 'Department',
+        trend: ((data.avgBonus - data.avgSalary) / data.avgSalary) * 100, // Calculate performance trend
+        metadata: {
+          employeeCount: data.count,
+          avgBonus: data.avgBonus,
+          avgSalary: data.avgSalary,
+          department: department
+        }
+      }));
+  };
+
+  const convertSummaryMetricsToAdvanced = (): VisualizationData[] => {
+    return [
+      {
+        name: 'Total Pool',
+        value: scenarioResults.totalBonusPool,
+        category: 'Financial',
+        trend: 5.2 // Simulated trend
+      },
+      {
+        name: 'Avg Bonus',
+        value: scenarioResults.avgBonusAmount,
+        category: 'Financial',
+        trend: 3.1
+      },
+      {
+        name: 'Avg %',
+        value: scenarioResults.avgBonusPercentage,
+        category: 'Performance',
+        trend: 2.8
+      },
+      {
+        name: 'Capped Rate',
+        value: (scenarioResults.cappedEmployees / scenarioResults.totalEmployees) * 100,
+        category: 'Risk',
+        trend: -1.2
+      }
+    ];
+  };
+
+  const convertToPerformanceHeatmap = (): HeatmapDataPoint[] => {
+    const metrics = ['Performance', 'Satisfaction', 'Retention', 'Growth'];
+    const departments = Object.keys(departmentBreakdown);
+    const heatmapData: HeatmapDataPoint[] = [];
+
+    departments.forEach(dept => {
+      metrics.forEach((metric, metricIndex) => {
+        const baseValue = departmentBreakdown[dept].avgBonus / 1000; // Convert to thousands for readability
+        const variation = Math.random() * 20 + 70; // Random performance between 70-90
+        
+        heatmapData.push({
+          x: dept,
+          y: metric,
+          value: variation,
+          label: `${dept} - ${metric}`,
+          metadata: {
+            department: dept,
+            metric: metric,
+            value: variation,
+            bonus: departmentBreakdown[dept].totalBonus,
+            employees: departmentBreakdown[dept].count
+          }
+        });
+      });
+    });
+
+    return heatmapData;
+  };
 
   // Prepare data for bonus distribution chart
   const bonusDistributionData = scenarioResults.bonusDistribution.map(item => ({
@@ -163,10 +243,29 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
     <div className="space-y-6">
       {showTitle && (
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold text-gray-800">{title}</h2>
-          <p className="text-gray-600 mt-2">
-            Interactive visualizations of scenario results and bonus distribution analysis.
-          </p>
+          <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+            <Box>
+              <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+              <p className="text-gray-600 mt-2">
+                Interactive visualizations of scenario results and bonus distribution analysis.
+              </p>
+            </Box>
+            <Box>
+              <MuiTooltip title="Toggle between standard and advanced visualization modes">
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={useAdvancedVisualizations}
+                      onChange={(e) => setUseAdvancedVisualizations(e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label="Advanced Viz"
+                  labelPlacement="start"
+                />
+              </MuiTooltip>
+            </Box>
+          </Box>
         </div>
       )}
 
@@ -174,30 +273,48 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold mb-4 text-gray-800">Employee Summary Metrics</h3>
         <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={summaryMetrics} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis 
-                dataKey="metric" 
-                tick={{ fontSize: 12, fill: '#666' }}
-                interval={0}
-                angle={-45}
-                textAnchor="end"
-                height={80}
-              />
-              <YAxis tick={{ fontSize: 12, fill: '#666' }} />
-              <Tooltip content={<CustomTooltip />} />
-              <Bar 
-                dataKey="value" 
-                fill="#8884d8"
-                radius={[4, 4, 0, 0]}
-              >
-                {summaryMetrics.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          {useAdvancedVisualizations ? (
+            <AdvancedVisualizationLibrary
+              type="bar"
+              data={convertSummaryMetricsToAdvanced()}
+              config={{
+                xAxis: { dataKey: 'name', label: 'Metrics' },
+                yAxis: { label: 'Value' },
+                colors: COLORS,
+                showLegend: true,
+                showTooltip: true,
+                showTrend: true,
+                groupBy: 'category'
+              }}
+              height={320}
+              width="100%"
+            />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={summaryMetrics} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis 
+                  dataKey="metric" 
+                  tick={{ fontSize: 12, fill: '#666' }}
+                  interval={0}
+                  angle={-45}
+                  textAnchor="end"
+                  height={80}
+                />
+                <YAxis tick={{ fontSize: 12, fill: '#666' }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar 
+                  dataKey="value" 
+                  fill="#8884d8"
+                  radius={[4, 4, 0, 0]}
+                >
+                  {summaryMetrics.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
@@ -337,6 +454,28 @@ export const ScenarioVisualization: React.FC<ScenarioVisualizationProps> = ({
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Advanced Performance Heatmap */}
+      {useAdvancedVisualizations && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 text-gray-800">Department Performance Heatmap</h3>
+          <p className="text-gray-600 mb-4">
+            Interactive analysis of department performance across key metrics
+          </p>
+          <div className="h-96">
+            <InteractiveHeatmap
+              data={convertToPerformanceHeatmap()}
+              title="Department Performance Matrix"
+              colorScheme="diverging"
+              height={380}
+              width="100%"
+              showTooltip={true}
+              cellSize={{ width: 120, height: 80 }}
+              margin={{ top: 60, right: 20, bottom: 60, left: 140 }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Key Statistics Summary */}
       <div className="bg-white rounded-lg shadow p-6">

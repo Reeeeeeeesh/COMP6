@@ -1,0 +1,95 @@
+# Task ID: 11
+# Title: Implement Scenario Playground Module - Data Seeding
+# Status: done
+# Dependencies: 7, 10
+# Priority: medium
+# Description: Develop the functionality to seed the Scenario Playground with data from a processed batch or individual calculator.
+# Details:
+1. Create frontend components:
+   - ScenarioPlayground.tsx: Main container for the scenario playground
+   - DataSourceSelector.tsx: Component for selecting the data source
+2. Implement backend endpoints:
+   - POST /api/v1/scenarios: Create a new scenario
+   - GET /api/v1/scenarios/{scenario_id}: Get a saved scenario
+3. Create data seeding functionality:
+   - From a processed batch
+   - (Optional) From an individual employee
+4. Implement state management for scenario data
+
+Example data source selector component:
+```typescript
+const DataSourceSelector: React.FC<{
+  onSourceSelect: (source: { type: 'batch' | 'individual', id: number }) => void;
+}> = ({ onSourceSelect }) => {
+  const [batches, setBatches] = useState<BatchUpload[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const fetchBatches = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('/api/v1/batch/uploads');
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch batches');
+        }
+        
+        const data = await response.json();
+        setBatches(data.filter(batch => batch.status === 'completed'));
+      } catch (err) {
+        setError(err.message || 'An error occurred');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchBatches();
+  }, []);
+  
+  return (
+    <div className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Select Data Source for Scenario</h2>
+      
+      {loading ? (
+        <p>Loading data sources...</p>
+      ) : error ? (
+        <p className="text-red-500">{error}</p>
+      ) : (
+        <div>
+          <h3 className="font-bold mb-2">Available Batches</h3>
+          
+          {batches.length === 0 ? (
+            <p className="text-gray-500">No completed batches available</p>
+          ) : (
+            <div className="space-y-2">
+              {batches.map(batch => (
+                <div key={batch.id} className="p-3 border rounded hover:bg-gray-50 cursor-pointer"
+                     onClick={() => onSourceSelect({ type: 'batch', id: batch.id })}>
+                  <p className="font-medium">{batch.filename}</p>
+                  <p className="text-sm text-gray-500">
+                    Uploaded: {new Date(batch.uploaded_at).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {batch.employee_count || 0} employees
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Individual employee selection could be added here if implemented */}
+        </div>
+      )}
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for data source selection component
+2. Integration tests for scenario creation API endpoints
+3. Test data seeding from batch results
+4. (If implemented) Test data seeding from individual employee
+5. Verify state management correctly initializes with seeded data
+6. Test handling of invalid or incomplete data sources

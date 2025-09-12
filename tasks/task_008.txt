@@ -1,0 +1,152 @@
+# Task ID: 8
+# Title: Implement Individual Compensation Calculator - Data Loading from Batch
+# Status: done
+# Dependencies: 7
+# Priority: medium
+# Description: Develop the functionality to load individual employee data from a processed batch into the Individual Compensation Calculator.
+# Details:
+1. Create frontend components:
+   - CalculatorContainer.tsx: Main container for the individual calculator
+   - EmployeeSelector.tsx: Component for selecting an employee from batch results
+2. Implement navigation from batch results to individual calculator
+3. Create state management for individual calculator data
+4. Implement data loading from batch results to individual calculator
+5. Ensure global parameters from the batch are loaded as defaults
+
+Example employee selection component:
+```typescript
+const EmployeeSelector: React.FC<{
+  batchId: number;
+  onEmployeeSelect: (employeeData: EmployeeData) => void;
+}> = ({ batchId, onEmployeeSelect }) => {
+  const [employees, setEmployees] = useState<EmployeeData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`/api/v1/batch/uploads/${batchId}/employees`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch employees');
+        }
+        
+        const data = await response.json();
+        setEmployees(data);
+      } catch (err) {
+        setError(err.message || 'An error occurred');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchEmployees();
+  }, [batchId]);
+  
+  const filteredEmployees = employees.filter(emp => 
+    emp.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    emp.employee_id?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  
+  return (
+    <div className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Select Employee</h2>
+      
+      <input
+        type="text"
+        placeholder="Search by name or ID"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="p-2 border rounded w-full mb-4"
+      />
+      
+      {loading ? (
+        <p>Loading employees...</p>
+      ) : error ? (
+        <p className="text-red-500">{error}</p>
+      ) : (
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="p-2 text-left">ID</th>
+                <th className="p-2 text-left">Name</th>
+                <th className="p-2 text-left">Team</th>
+                <th className="p-2 text-left">Base Salary</th>
+                <th className="p-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredEmployees.map(emp => (
+                <tr key={emp.id} className="border-t hover:bg-gray-50">
+                  <td className="p-2">{emp.employee_id}</td>
+                  <td className="p-2">{emp.name}</td>
+                  <td className="p-2">{emp.team}</td>
+                  <td className="p-2">£{emp.base_salary.toLocaleString()}</td>
+                  <td className="p-2">
+                    <button
+                      onClick={() => onEmployeeSelect(emp)}
+                      className="px-3 py-1 bg-blue-500 text-white rounded text-sm"
+                    >
+                      Select
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for employee selection component
+2. Integration tests for navigation from batch results to individual calculator
+3. Test data loading from batch to individual calculator
+4. Verify global parameters are correctly loaded as defaults
+5. Test search and filtering functionality
+6. Validate handling of missing or incomplete employee data
+
+# Subtasks:
+## 1. Design Employee Selection Interface [done]
+### Dependencies: None
+### Description: Create a user interface component for selecting individual employees from batch calculation results
+### Details:
+Develop a responsive table/list view that displays employee data from batch results with clear selection affordances. Include sorting and filtering capabilities to help users locate specific employees. Implement hover states and selection indicators to provide clear feedback. Design should follow existing design system patterns and accessibility guidelines. Include pagination if large datasets are expected.
+
+## 2. Implement State Management for Individual Calculator [done]
+### Dependencies: None
+### Description: Create Redux slices and actions to manage individual calculator data flow
+### Details:
+Define Redux state structure for individual calculator data. Create actions for loading, selecting, and clearing employee data. Implement reducers to handle state transitions. Add selectors for accessing individual calculator state. Include error handling for failed data loading. Document the state management approach for team reference. Ensure proper normalization of data to avoid duplication.
+
+## 3. Develop API Integration Service [done]
+### Dependencies: 8.2
+### Description: Create service layer to handle API requests for individual employee data
+### Details:
+Implement API client functions to fetch detailed employee data. Add error handling and retry logic for resilient data fetching. Create data transformation utilities to convert API responses to application state format. Implement caching strategy to minimize redundant API calls. Document API endpoints and data structures. Include fallback mechanisms for API endpoint mismatches similar to batch calculation service.
+
+## 4. Build Navigation System Between Modules [done]
+### Dependencies: 8.1
+### Description: Implement navigation flow between batch results and individual calculator
+### Details:
+Create route definitions for transitioning between batch and individual views. Implement navigation actions that preserve state during transitions. Add breadcrumb component for context awareness. Ensure browser history works correctly with the navigation flow. Implement URL parameter handling to support direct linking to individual employee data. Test navigation with various user flows to ensure smooth transitions.
+
+## 5. Implement Data Transfer Between Modules [done]
+### Dependencies: 8.2, 8.3, 8.4
+### Description: Create mechanism to pass selected employee data from batch results to individual calculator
+### Details:
+Develop data transfer service to extract relevant employee data from batch results. Implement data transformation functions to prepare batch data for individual calculator. Add validation to ensure data integrity during transfer. Create loading states for transition periods. Implement error handling for failed data transfers. Test with various data scenarios including edge cases.
+
+## 6. Integration Testing and Refinement [done]
+### Dependencies: 8.1, 8.2, 8.3, 8.4, 8.5
+### Description: Test complete flow from batch results to individual calculator and refine implementation
+### Details:
+Create integration tests covering the full user journey. Test with various data volumes and scenarios. Verify proper state management during navigation. Ensure UI components respond correctly to loading and error states. Optimize performance for large datasets. Conduct usability testing with stakeholders. Document any edge cases or limitations discovered during testing. Implement refinements based on testing feedback.
+

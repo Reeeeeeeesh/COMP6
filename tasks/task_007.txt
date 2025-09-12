@@ -1,0 +1,152 @@
+# Task ID: 7
+# Title: Implement Batch Processing Module - Calculation and Results Display
+# Status: done
+# Dependencies: 3, 6
+# Priority: high
+# Description: Develop the batch calculation engine and results display interface for the Batch Processing Module.
+# Details:
+1. Create frontend components:
+   - BatchResultsDisplay.tsx: Tabular display of batch calculation results
+   - BatchSummary.tsx: Summary statistics for the batch
+2. Implement backend endpoints:
+   - POST /api/v1/batch/uploads/{upload_id}/calculate_and_retrieve_results: Trigger calculation
+   - GET /api/v1/batch/uploads/{upload_id}/employees: Get processed employee data
+3. Implement batch calculation service:
+   - Process all valid employee records
+   - Apply global parameters and individual overrides
+   - Calculate bonuses using the core calculation engine
+   - Store results in the database
+4. Add sorting, filtering, and search functionality to the results table
+5. Implement export to CSV/Excel functionality
+6. Add progress tracking for large batch calculations
+
+Example batch calculation service:
+```python
+class BatchCalculationService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.calculation_engine = CalculationEngine()
+    
+    async def calculate_batch(self, batch_upload_id: int, global_parameters: dict) -> BatchCalculationResult:
+        """Calculate bonuses for all employees in a batch."""
+        # Get all employee data for this batch
+        employee_data = await EmployeeDataDAL(self.db).get_by_batch_upload_id(batch_upload_id)
+        
+        # Create a new batch scenario for this calculation
+        scenario = await BatchScenarioDAL(self.db).create(
+            session_id=employee_data[0].batch_upload.session_id if employee_data else None,
+            name=f"Batch {batch_upload_id} - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            global_parameters=global_parameters,
+            is_saved=False
+        )
+        
+        # Create a new batch calculation result
+        batch_result = await BatchCalculationResultDAL(self.db).create(
+            scenario_id=scenario.id,
+            total_employees=len(employee_data),
+            total_bonus_pool=0,  # Will update after calculations
+            average_bonus=0,     # Will update after calculations
+            capped_employees=0   # Will update after calculations
+        )
+        
+        # Calculate bonus for each employee
+        employee_results = []
+        total_bonus = 0
+        capped_count = 0
+        
+        for employee in employee_data:
+            # Apply global parameters with potential individual overrides
+            params = self._merge_parameters(global_parameters, employee.parameter_overrides or {})
+            
+            # Calculate bonus
+            result = self.calculation_engine.calculate_final_bonus(
+                base_salary=employee.base_salary,
+                target_bonus_pct=employee.target_bonus_pct or params.get('targetBonusPct', 0),
+                investment_weight=employee.investment_weight or params.get('investmentWeight', 0.6),
+                investment_score_multiplier=employee.investment_score_multiplier,
+                qualitative_weight=employee.qualitative_weight or params.get('qualitativeWeight', 0.4),
+                qual_score_multiplier=employee.qual_score_multiplier,
+                raf=employee.raf,
+                is_mrt=employee.is_mrt,
+                mrt_cap_pct=employee.mrt_cap_pct or params.get('mrtCapPct')
+            )
+            
+            # Create employee calculation result
+            employee_result = await EmployeeCalculationResultDAL(self.db).create(
+                batch_result_id=batch_result.id,
+                employee_data_id=employee.id,
+                final_bonus=result['final_bonus'],
+                pre_raf_bonus=result['pre_raf_bonus'],
+                initial_bonus=result['initial_bonus'],
+                applied_cap=result['cap_applied']
+            )
+            
+            employee_results.append(employee_result)
+            total_bonus += result['final_bonus']
+            if result['cap_applied']:
+                capped_count += 1
+        
+        # Update batch result with summary statistics
+        average_bonus = total_bonus / len(employee_data) if employee_data else 0
+        await BatchCalculationResultDAL(self.db).update(
+            batch_result.id,
+            total_bonus_pool=total_bonus,
+            average_bonus=average_bonus,
+            capped_employees=capped_count
+        )
+        
+        return batch_result
+    
+    def _merge_parameters(self, global_params: dict, individual_overrides: dict) -> dict:
+        """Merge global parameters with individual overrides."""
+        result = global_params.copy()
+        result.update(individual_overrides)
+        return result
+```
+
+# Test Strategy:
+1. Unit tests for batch calculation service
+2. Integration tests for batch calculation API endpoints
+3. Test with various batch sizes (small, medium, large)
+4. Validate summary statistics calculation
+5. Test sorting, filtering, and search functionality
+6. Verify export functionality produces correct CSV/Excel files
+7. Test progress tracking for large batches
+
+# Subtasks:
+## 1. Implement Batch Calculation Service [done]
+### Dependencies: None
+### Description: Develop a service to handle batch calculations for employee data processing
+### Details:
+Implement efficient algorithms for processing large datasets. Include error handling for invalid input data. Optimize for performance using parallel processing where applicable. Integrate with existing data models and ensure scalability for future additions.
+
+## 2. Create Results Table UI with Sorting and Filtering [done]
+### Dependencies: 7.1
+### Description: Design and implement a user interface to display calculation results in a table format with sorting and filtering capabilities
+### Details:
+Use a responsive design for various screen sizes. Implement client-side sorting and filtering for improved performance. Handle large datasets with pagination or virtual scrolling. Include error states for failed calculations or data retrieval.
+
+## 3. Develop Summary Statistics Components [done]
+### Dependencies: 7.1, 7.2
+### Description: Create components to display summary statistics of the batch calculation results
+### Details:
+Design reusable chart components for visualizing key metrics. Implement real-time updates for live calculations. Ensure accessibility compliance for all statistical representations. Include tooltips for detailed information.
+
+## 4. Implement Progress Tracking for Large Batches [done]
+### Dependencies: 7.1
+### Description: Develop a system to track and display progress for time-consuming batch calculations
+### Details:
+Use WebSockets or Server-Sent Events for real-time progress updates. Implement a robust error recovery mechanism for interrupted calculations. Design a user-friendly progress indicator with estimated time remaining.
+
+## 5. Add Export Functionality [done]
+### Dependencies: 7.1, 7.2
+### Description: Implement features to export calculation results in various formats
+### Details:
+Support multiple export formats (CSV, PDF, Excel). Implement server-side generation for large datasets. Include progress tracking for time-consuming exports. Ensure exported data adheres to security and privacy requirements.
+
+## 6. Develop Backend API Endpoints [done]
+### Dependencies: 7.1, 7.4
+### Description: Create RESTful API endpoints to support batch calculations and result retrieval
+### Details:
+Design scalable API architecture. Implement proper authentication and authorization. Include rate limiting and request validation. Develop comprehensive API documentation using tools like Swagger.
+

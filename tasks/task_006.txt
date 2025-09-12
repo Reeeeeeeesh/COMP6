@@ -1,0 +1,161 @@
+# Task ID: 6
+# Title: Implement Batch Processing Module - Global Parameter Configuration
+# Status: done
+# Dependencies: 5
+# Priority: medium
+# Description: Develop the interface for configuring global calculation parameters to be applied to an entire batch.
+# Details:
+1. Create frontend components:
+   - BatchParameterConfig.tsx: Form for configuring global calculation parameters
+2. Implement parameter configuration for:
+   - Standard Target Bonus %
+   - Investment & Qualitative Weights
+   - Parameters for Investment Score Multiplier curve
+   - Parameters for Qualitative Score Multiplier curve
+   - RAF calculation parameters or global RAF value
+   - MRT Cap Percentage and other policy settings
+3. Add validation for parameter values (e.g., weights must sum to 100%)
+4. Implement parameter storage in the batch upload record
+5. Create UI for parameter presets or quick configurations
+
+Example parameter configuration component:
+```typescript
+const BatchParameterConfig: React.FC<{
+  onSubmit: (parameters: BatchParameters) => void;
+  initialValues?: BatchParameters;
+}> = ({ onSubmit, initialValues }) => {
+  const [parameters, setParameters] = useState<BatchParameters>(initialValues || {
+    targetBonusPct: 0.4, // 40%
+    investmentWeight: 0.6, // 60%
+    qualitativeWeight: 0.4, // 40%
+    rafSensitivity: 0.2,
+    rafLowerClamp: 0,
+    rafUpperClamp: 1.2,
+    mrtCapPct: 1.0, // 100% of base salary
+    useDirectRaf: true, // Use RAF from CSV if available
+  });
+  
+  const handleChange = (field: keyof BatchParameters, value: number | boolean) => {
+    setParameters(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    
+    // If investment weight changes, adjust qualitative weight to maintain sum of 1
+    if (field === 'investmentWeight') {
+      setParameters(prev => ({
+        ...prev,
+        qualitativeWeight: 1 - Number(value)
+      }));
+    } else if (field === 'qualitativeWeight') {
+      setParameters(prev => ({
+        ...prev,
+        investmentWeight: 1 - Number(value)
+      }));
+    }
+  };
+  
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(parameters);
+  };
+  
+  return (
+    <form onSubmit={handleSubmit} className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Global Calculation Parameters</h2>
+      
+      <div className="mb-4">
+        <label className="block mb-2">Default Target Bonus %</label>
+        <input
+          type="number"
+          min="0"
+          max="2"
+          step="0.01"
+          value={parameters.targetBonusPct}
+          onChange={(e) => handleChange('targetBonusPct', Number(e.target.value))}
+          className="p-2 border rounded w-full"
+        />
+      </div>
+      
+      <div className="mb-4">
+        <label className="block mb-2">Investment Weight</label>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={parameters.investmentWeight}
+          onChange={(e) => handleChange('investmentWeight', Number(e.target.value))}
+          className="w-full"
+        />
+        <div className="flex justify-between">
+          <span>0%</span>
+          <span>{(parameters.investmentWeight * 100).toFixed(0)}%</span>
+          <span>100%</span>
+        </div>
+      </div>
+      
+      <div className="mb-4">
+        <label className="block mb-2">Qualitative Weight</label>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={parameters.qualitativeWeight}
+          onChange={(e) => handleChange('qualitativeWeight', Number(e.target.value))}
+          className="w-full"
+        />
+        <div className="flex justify-between">
+          <span>0%</span>
+          <span>{(parameters.qualitativeWeight * 100).toFixed(0)}%</span>
+          <span>100%</span>
+        </div>
+      </div>
+      
+      {/* Additional parameter inputs... */}
+      
+      <button 
+        type="submit"
+        className="px-4 py-2 bg-blue-500 text-white rounded"
+      >
+        Apply Parameters
+      </button>
+    </form>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for parameter configuration components
+2. Validation tests for parameter constraints (e.g., weights sum to 100%)
+3. Test parameter storage and retrieval
+4. Verify parameter application to batch calculations
+5. Test parameter presets and quick configurations
+6. Validate handling of parameter overrides from CSV data
+
+# Subtasks:
+## 1. Develop Parameter Configuration UI Components [done]
+### Dependencies: None
+### Description: Create the user interface components for configuring global parameters with real-time validation feedback.
+### Details:
+Technical requirements: 1) Build form components for numeric inputs, dropdowns, and toggles; 2) Implement client-side validation for parameter constraints (e.g., weights must sum to 100%, values within specified ranges); 3) Create error/warning indicators with descriptive messages; 4) Design responsive layout that works across device sizes. Validation rules: Implement type checking, range validation, interdependent field validation (e.g., related parameters), and required field validation. Integration points: UI components should emit events when values change to trigger validation and preview calculations.
+
+## 2. Implement Parameter Storage in Batch Records [done]
+### Dependencies: 6.1
+### Description: Develop the data model and storage mechanisms for persisting parameter configurations within batch records.
+### Details:
+Technical requirements: 1) Design schema for parameter storage that includes parameter values, metadata, and validation state; 2) Implement serialization/deserialization of parameter configurations; 3) Create API endpoints for saving and retrieving parameter configurations; 4) Ensure backward compatibility with existing batch records. Validation rules: Server-side validation to ensure data integrity, parameter value constraints, and schema validation. Integration points: Database layer, batch record service, audit logging system for tracking parameter changes.
+
+## 3. Develop Parameter Preset Functionality [done]
+### Dependencies: 6.1, 6.2
+### Description: Create the ability to save, load, and manage parameter configuration presets.
+### Details:
+Technical requirements: 1) Design UI for saving current parameters as a named preset; 2) Implement preset selection dropdown with preview capability; 3) Create preset management interface (rename, delete, set default); 4) Develop import/export functionality for presets. Validation rules: Validate preset names for uniqueness and format, ensure complete parameter sets in presets, verify preset compatibility with current system configuration. Integration points: User preferences service, parameter storage system, permission system for shared presets.
+
+## 4. Integrate with Calculation Engine [done]
+### Dependencies: 6.1, 6.2, 6.3
+### Description: Connect the parameter configuration system with the calculation engine to apply parameters to data processing.
+### Details:
+Technical requirements: 1) Develop parameter transformation layer to convert UI parameters to calculation engine format; 2) Implement parameter injection into calculation pipeline; 3) Create preview calculation functionality using current parameters; 4) Add parameter validation specific to calculation requirements. Validation rules: Validate parameters against calculation engine constraints, ensure all required parameters are provided, check for parameter combinations that may cause performance issues. Integration points: Calculation engine API, batch processing workflow, results preview system, error handling and reporting system.
+

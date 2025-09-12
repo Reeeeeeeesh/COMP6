@@ -1,0 +1,120 @@
+# Task ID: 15
+# Title: Implement Session Management and Application Workflow
+# Status: done
+# Dependencies: 4, 7, 10, 14
+# Priority: high
+# Description: Develop the session management system and implement the overall application workflow as specified in FR0.
+# Details:
+1. Create frontend components:
+   - AppLayout.tsx: Main application layout with navigation
+   - LandingPage.tsx: Default landing page (Batch Upload interface)
+   - SessionManager.tsx: Component for managing the user session
+2. Implement backend endpoints:
+   - POST /api/v1/batch/sessions: Create a new anonymous session
+   - GET /api/v1/batch/sessions/current: Get current session details
+3. Create session management logic:
+   - Generate and store anonymous session IDs
+   - Associate uploaded data with sessions
+   - Implement session expiration and cleanup
+4. Implement the overall application workflow:
+   - Landing Page -> Batch Upload -> Column Mapping -> Parameter Configuration -> Batch Results
+   - Batch Results -> Individual Calculator
+   - Batch Results/Individual Calculator -> Scenario Playground
+5. Add navigation between modules
+6. Implement data retention policies
+
+Example session management service:
+```python
+class SessionService:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    async def create_session(self) -> SessionModel:
+        """Create a new anonymous session."""
+        # Generate a secure random session ID
+        session_id = secrets.token_urlsafe(32)
+        
+        # Set expiration time (e.g., 24 hours from now)
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        
+        # Create session in database
+        session = await SessionDAL(self.db).create(
+            id=session_id,
+            expires_at=expires_at
+        )
+        
+        return session
+    
+    async def get_session(self, session_id: str) -> Optional[SessionModel]:
+        """Get a session by ID."""
+        session = await SessionDAL(self.db).get_by_id(session_id)
+        
+        if not session:
+            return None
+        
+        # Check if session has expired
+        if session.expires_at < datetime.utcnow():
+            await self.cleanup_session(session_id)
+            return None
+        
+        return session
+    
+    async def extend_session(self, session_id: str) -> Optional[SessionModel]:
+        """Extend the expiration time of a session."""
+        session = await self.get_session(session_id)
+        
+        if not session:
+            return None
+        
+        # Extend expiration time
+        new_expires_at = datetime.utcnow() + timedelta(hours=24)
+        
+        # Update session in database
+        updated_session = await SessionDAL(self.db).update(
+            session_id,
+            expires_at=new_expires_at
+        )
+        
+        return updated_session
+    
+    async def cleanup_session(self, session_id: str) -> None:
+        """Clean up all data associated with a session."""
+        # Delete all batch uploads associated with this session
+        batch_uploads = await BatchUploadDAL(self.db).get_by_session_id(session_id)
+        
+        for batch_upload in batch_uploads:
+            # Delete employee data associated with this batch upload
+            await EmployeeDataDAL(self.db).delete_by_batch_upload_id(batch_upload.id)
+            
+            # Delete the batch upload itself
+            await BatchUploadDAL(self.db).delete(batch_upload.id)
+        
+        # Delete all scenarios associated with this session
+        scenarios = await BatchScenarioDAL(self.db).get_by_session_id(session_id)
+        
+        for scenario in scenarios:
+            # Delete calculation results associated with this scenario
+            batch_results = await BatchCalculationResultDAL(self.db).get_by_scenario_id(scenario.id)
+            
+            for batch_result in batch_results:
+                await EmployeeCalculationResultDAL(self.db).delete_by_batch_result_id(batch_result.id)
+                await BatchCalculationResultDAL(self.db).delete(batch_result.id)
+            
+            # Delete the scenario itself
+            await BatchScenarioDAL(self.db).delete(scenario.id)
+        
+        # Delete all templates associated with this session
+        await ImportTemplateDAL(self.db).delete_by_session_id(session_id)
+        
+        # Finally, delete the session itself
+        await SessionDAL(self.db).delete(session_id)
+```
+
+# Test Strategy:
+1. Unit tests for session management components and services
+2. Integration tests for session API endpoints
+3. Test session creation, expiration, and cleanup
+4. Verify data retention policies work as expected
+5. Test the overall application workflow
+6. Validate navigation between modules
+7. Test with multiple concurrent sessions

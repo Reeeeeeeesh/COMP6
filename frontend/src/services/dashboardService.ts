@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config';
+import { apiRequest, ApiResponse } from './apiClient';
 
 export interface DashboardSummary {
   summary: {
@@ -87,36 +87,30 @@ export interface BonusDistribution {
 }
 
 class DashboardService {
-  private baseUrl = `${API_BASE_URL}/api/v1/dashboard`;
+  private baseUrl = '/api/v1/dashboard';
 
   async getDashboardSummary(sessionId: string, days: number = 30): Promise<DashboardSummary> {
-    const response = await fetch(`${this.baseUrl}/summary?session_id=${sessionId}&days=${days}`);
+    const response = await apiRequest.get<DashboardSummary>(
+      `${this.baseUrl}/summary?session_id=${sessionId}&days=${days}`
+    );
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch dashboard summary: ${response.statusText}`);
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to get dashboard summary');
     }
     
-    const result = await response.json();
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to get dashboard summary');
-    }
-    
-    return result.data;
+    return response.data!;
   }
 
   async getKeyMetrics(sessionId: string): Promise<KeyMetrics> {
-    const response = await fetch(`${this.baseUrl}/metrics?session_id=${sessionId}`);
+    const response = await apiRequest.get<KeyMetrics>(
+      `${this.baseUrl}/metrics?session_id=${sessionId}`
+    );
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch key metrics: ${response.statusText}`);
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to get key metrics');
     }
     
-    const result = await response.json();
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to get key metrics');
-    }
-    
-    return result.data;
+    return response.data!;
   }
 
   async getDepartmentBreakdown(sessionId: string): Promise<{

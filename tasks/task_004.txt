@@ -1,0 +1,126 @@
+# Task ID: 4
+# Title: Implement Batch Processing Module - File Upload and Validation
+# Status: done
+# Dependencies: 2, 3
+# Priority: high
+# Description: Develop the file upload component of the Batch Processing Module, including CSV parsing, initial validation, and column preview functionality.
+# Details:
+1. Create frontend components:
+   - BatchUploadContainer.tsx: Main container for the batch upload process
+   - FileUpload.tsx: Component for file selection and upload
+   - FilePreview.tsx: Display initial file preview and validation results
+2. Implement backend endpoints:
+   - POST /api/v1/batch/file: Upload CSV file
+   - GET /api/v1/batch/uploads/{upload_id}/columns: Get column info
+   - GET /api/v1/batch/uploads/template/{file_format}: Download template
+3. Implement file processing service:
+   - Parse CSV files
+   - Validate file structure and format
+   - Extract column headers and sample data
+   - Store raw file content in the database
+4. Add progress indicators for file upload
+5. Implement error handling for invalid files
+
+Example frontend component:
+```typescript
+const FileUpload: React.FC = () => {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFile(e.target.files[0]);
+      setError(null);
+    }
+  };
+  
+  const handleUpload = async () => {
+    if (!file) return;
+    
+    setUploading(true);
+    setError(null);
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      const response = await fetch('/api/v1/batch/file', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+      
+      const data = await response.json();
+      // Handle successful upload
+    } catch (err) {
+      setError(err.message || 'An error occurred during upload');
+    } finally {
+      setUploading(false);
+    }
+  };
+  
+  return (
+    <div className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Upload Employee Data</h2>
+      <input 
+        type="file" 
+        accept=".csv" 
+        onChange={handleFileChange} 
+        className="mb-4"
+      />
+      <button 
+        onClick={handleUpload} 
+        disabled={!file || uploading}
+        className="px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-300"
+      >
+        {uploading ? 'Uploading...' : 'Upload'}
+      </button>
+      {error && <p className="text-red-500 mt-2">{error}</p>}
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for file upload components
+2. Integration tests for file upload API endpoints
+3. Test with various CSV formats and sizes
+4. Validate error handling for malformed or invalid files
+5. Test file size limits and upload progress indicators
+6. Verify that column headers and sample data are correctly extracted
+
+# Subtasks:
+## 1. Implement FileUpload.tsx Component [done]
+### Dependencies: None
+### Description: Create a React component for file selection and upload functionality
+### Details:
+Develop a FileUpload.tsx component that allows users to select a CSV file and initiate the upload process. Include file type validation, error handling, and upload progress indication.
+
+## 2. Create Backend File Upload Endpoint [done]
+### Dependencies: None
+### Description: Implement the POST /api/v1/batch/file endpoint for file upload
+### Details:
+Develop a backend endpoint that handles file upload requests, validates the file format, and stores the raw file content in the database. Implement proper error handling and response formatting.
+
+## 3. Implement CSV Parsing and Validation Service [done]
+### Dependencies: 4.2
+### Description: Create a service to parse CSV files, validate structure, and extract column information
+### Details:
+Develop a service that parses uploaded CSV files, validates the file structure and format, extracts column headers and sample data. Implement error handling for invalid files and data inconsistencies.
+
+## 4. Create FilePreview.tsx Component [done]
+### Dependencies: 4.1, 4.3
+### Description: Develop a component to display initial file preview and validation results
+### Details:
+Create a FilePreview.tsx component that displays the extracted column headers, sample data, and any validation results or errors from the CSV parsing process. Implement a user-friendly interface for reviewing the uploaded file contents.
+
+## 5. Implement Column Info Retrieval Endpoint [done]
+### Dependencies: 4.2, 4.3
+### Description: Create the GET /api/v1/batch/uploads/{upload_id}/columns endpoint
+### Details:
+Develop a backend endpoint that retrieves and returns column information for a specific upload, including headers and sample data. Implement proper error handling for invalid upload IDs or processing errors.
+

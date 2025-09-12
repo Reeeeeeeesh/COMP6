@@ -1,0 +1,40 @@
+# Task ID: 2
+# Title: Implement Core Data Models and Database Schema
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Design and implement the database schema and data models for the application, including session management, batch uploads, employee data, and scenario management.
+# Details:
+1. Define SQLAlchemy models for:
+   - Session (sessions table)
+   - BatchUpload (batch_uploads table)
+   - EmployeeData (employee_data table)
+   - BatchScenario (batch_scenarios table)
+   - BatchCalculationResult (batch_calculation_results table)
+   - EmployeeCalculationResult (employee_calculation_results table)
+   - ImportTemplate (import_templates table)
+   - ScenarioAuditLog (scenario_audit_log table)
+2. Create Pydantic schemas for request/response validation
+3. Implement database access layer (DAL) classes for each model
+4. Set up Alembic migrations for initial schema creation
+5. Implement session management logic with anonymous sessions
+6. Configure data retention policies for temporary batch data
+
+Example Session model:
+```python
+class Session(Base):
+    __tablename__ = "sessions"
+    
+    id = Column(String, primary_key=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+```
+
+# Test Strategy:
+1. Unit tests for each model and DAL class
+2. Integration tests for database operations
+3. Test session creation, expiration, and cleanup
+4. Verify data retention policies work as expected
+5. Test database migrations apply correctly
+6. Validate foreign key constraints and relationships

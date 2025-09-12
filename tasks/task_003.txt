@@ -1,0 +1,96 @@
+# Task ID: 3
+# Title: Implement Core Calculation Engine
+# Status: done
+# Dependencies: 2
+# Priority: high
+# Description: Develop the core calculation engine that will be used across all modules (batch processing, individual calculator, and scenario playground) to ensure consistent bonus calculations.
+# Details:
+1. Implement the core bonus formula: FinalBonus = BaseSalary × TargetBonusPct × (InvestmentWeight × InvestmentScoreMultiplier + QualitativeWeight × QualScoreMultiplier) × RAF
+2. Create pure functions for all intermediate calculations:
+   - Target bonus calculation
+   - Weighted performance scores
+   - RAF calculation with sensitivity and clamping
+   - Cap application logic (3x Base Salary and MRT Cap)
+3. Implement both backend (Python) and frontend (TypeScript) versions of the calculation engine
+4. Ensure calculation logic is identical between frontend and backend
+5. Create utility functions for validation and error handling
+
+Example calculation function:
+```python
+def calculate_final_bonus(base_salary: float, target_bonus_pct: float, 
+                         investment_weight: float, investment_score_multiplier: float,
+                         qualitative_weight: float, qual_score_multiplier: float,
+                         raf: float, is_mrt: bool = False, mrt_cap_pct: float = None) -> dict:
+    """Calculate the final bonus with all intermediate steps."""
+    # Calculate target bonus
+    target_bonus = base_salary * target_bonus_pct
+    
+    # Calculate weighted performance
+    weighted_performance = (investment_weight * investment_score_multiplier + 
+                           qualitative_weight * qual_score_multiplier)
+    
+    # Calculate pre-RAF bonus
+    pre_raf_bonus = target_bonus * weighted_performance
+    
+    # Apply RAF
+    initial_bonus = pre_raf_bonus * raf
+    
+    # Apply caps
+    base_salary_cap = base_salary * 3
+    mrt_cap = base_salary * mrt_cap_pct if is_mrt and mrt_cap_pct else float('inf')
+    
+    # Apply the lower of the caps if either is breached
+    final_bonus = min(initial_bonus, base_salary_cap, mrt_cap)
+    
+    return {
+        "target_bonus": target_bonus,
+        "weighted_performance": weighted_performance,
+        "pre_raf_bonus": pre_raf_bonus,
+        "initial_bonus": initial_bonus,
+        "base_salary_cap": base_salary_cap,
+        "mrt_cap": mrt_cap if is_mrt else None,
+        "final_bonus": final_bonus,
+        "cap_applied": "3x_base" if final_bonus == base_salary_cap and final_bonus < initial_bonus else
+                      "mrt" if final_bonus == mrt_cap and final_bonus < initial_bonus else None
+    }
+```
+
+# Test Strategy:
+1. Unit tests for all calculation functions using the truth table cases from Section 11
+2. Edge case tests using scenarios from Section 13
+3. Property-based testing to verify calculation invariants
+4. Cross-implementation tests to ensure frontend and backend calculations match
+5. Performance benchmarks for calculation speed
+6. Validation of RAF clamping behavior
+
+# Subtasks:
+## 1. Implement Core Bonus Formula [done]
+### Dependencies: None
+### Description: Create the main function to calculate the final bonus using the provided formula
+### Details:
+Implement the calculate_final_bonus function as shown in the example, ensuring all components of the formula are correctly applied: FinalBonus = BaseSalary × TargetBonusPct × (InvestmentWeight × InvestmentScoreMultiplier + QualitativeWeight × QualScoreMultiplier) × RAF
+
+## 2. Develop Intermediate Calculation Functions [done]
+### Dependencies: 3.1
+### Description: Create pure functions for all intermediate calculations in the bonus formula
+### Details:
+Implement separate functions for target bonus calculation, weighted performance scores, RAF calculation with sensitivity and clamping, and cap application logic (3x Base Salary and MRT Cap)
+
+## 3. Implement Backend Version [done]
+### Dependencies: 3.1, 3.2
+### Description: Create a Python version of the calculation engine for server-side use
+### Details:
+Translate the core bonus formula and intermediate calculations into Python, ensuring compatibility with the backend architecture and data models
+
+## 4. Implement Frontend Version [done]
+### Dependencies: 3.1, 3.2
+### Description: Develop a TypeScript version of the calculation engine for client-side use
+### Details:
+Port the Python implementation to TypeScript, maintaining identical calculation logic and adapting to frontend data structures and type system
+
+## 5. Create Validation and Error Handling Utilities [done]
+### Dependencies: 3.3, 3.4
+### Description: Implement utility functions for input validation and error handling
+### Details:
+Develop functions to validate input data, handle edge cases, and provide meaningful error messages for both backend and frontend implementations
+

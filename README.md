@@ -68,6 +68,26 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### One‑command Dev (both servers)
+
+You can start both the backend (port `8000`) and the frontend (port `3000`) together:
+
+```powershell
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1
+```
+
+```bash
+# macOS/Linux/WSL
+bash scripts/dev.sh
+```
+
+Notes
+- The frontend now binds with `host: true` and `strictPort: true`,
+  so it is always reachable at `http://localhost:3000` and won’t auto‑switch ports.
+- If you’re running backend/Frontend in WSL and using a Windows browser,
+  this host binding makes the dev server accessible from Windows.
+
 ### Database Setup
 ```bash
 # From the backend directory

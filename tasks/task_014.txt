@@ -1,0 +1,136 @@
+# Task ID: 14
+# Title: Implement Scenario Playground Module - Visualizations and Reporting
+# Status: done
+# Dependencies: 13
+# Priority: medium
+# Description: Develop the visualization and reporting components for the Scenario Playground.
+# Details:
+1. Create frontend components:
+   - ScenarioVisualization.tsx: Charts and visualizations for scenario data
+   - ScenarioSummary.tsx: Summary statistics for the scenario
+   - ScenarioExport.tsx: Export functionality for scenario data
+2. Implement visualizations:
+   - Bonus distribution histograms
+   - Team-level aggregation charts
+   - Sensitivity analysis charts
+3. Create summary statistics display
+4. Implement export functionality for scenario data
+
+Example visualization component:
+```typescript
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+const ScenarioVisualization: React.FC<{
+  scenarioResults: ScenarioResults;
+}> = ({ scenarioResults }) => {
+  // Prepare data for team-level aggregation chart
+  const teamData = Object.entries(scenarioResults.teamAggregations).map(([team, data]) => ({
+    team,
+    totalBonus: data.totalBonus,
+    averageBonus: data.averageBonus,
+    employeeCount: data.employeeCount
+  }));
+  
+  // Prepare data for bonus distribution histogram
+  const bonusRanges = [
+    '0-50k', '50k-100k', '100k-150k', '150k-200k', '200k-250k',
+    '250k-300k', '300k-350k', '350k-400k', '400k-450k', '450k-500k', '500k+'
+  ];
+  
+  const distributionData = bonusRanges.map(range => {
+    const count = scenarioResults.bonusDistribution[range] || 0;
+    return { range, count };
+  });
+  
+  return (
+    <div className="p-4 border rounded-lg">
+      <h2 className="text-xl font-bold mb-4">Scenario Visualizations</h2>
+      
+      <div className="mb-6">
+        <h3 className="font-bold mb-2">Team Aggregations</h3>
+        <div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={teamData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="team" />
+              <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
+              <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
+              <Tooltip />
+              <Legend />
+              <Bar yAxisId="left" dataKey="totalBonus" name="Total Bonus (£)" fill="#8884d8" />
+              <Bar yAxisId="right" dataKey="averageBonus" name="Average Bonus (£)" fill="#82ca9d" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      
+      <div className="mb-6">
+        <h3 className="font-bold mb-2">Bonus Distribution</h3>
+        <div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={distributionData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="range" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="count" name="Number of Employees" fill="#8884d8" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      
+      <div className="mb-6">
+        <h3 className="font-bold mb-2">Summary Statistics</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 bg-blue-50 rounded-lg text-center">
+            <h4 className="text-sm font-bold mb-1">Total Bonus Pool</h4>
+            <p className="text-2xl font-bold text-blue-700">£{scenarioResults.totalBonusPool.toLocaleString()}</p>
+          </div>
+          <div className="p-4 bg-green-50 rounded-lg text-center">
+            <h4 className="text-sm font-bold mb-1">Average Bonus</h4>
+            <p className="text-2xl font-bold text-green-700">£{scenarioResults.averageBonus.toLocaleString()}</p>
+          </div>
+          <div className="p-4 bg-yellow-50 rounded-lg text-center">
+            <h4 className="text-sm font-bold mb-1">Capped Employees</h4>
+            <p className="text-2xl font-bold text-yellow-700">{scenarioResults.cappedEmployees} / {scenarioResults.totalEmployees}</p>
+          </div>
+        </div>
+      </div>
+      
+      <div>
+        <button 
+          onClick={() => {
+            // Export logic here
+            const csvContent = `Team,Total Bonus,Average Bonus,Employee Count\n` +
+                            teamData.map(team => 
+                              `${team.team},${team.totalBonus},${team.averageBonus},${team.employeeCount}`
+                            ).join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'scenario_results.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }}
+          className="px-4 py-2 bg-green-500 text-white rounded"
+        >
+          Export Results
+        </button>
+      </div>
+    </div>
+  );
+};
+```
+
+# Test Strategy:
+1. Unit tests for visualization components
+2. Verify chart data is correctly derived from scenario results
+3. Test summary statistics calculation
+4. Validate export functionality produces correct files
+5. Test with various dataset sizes and distributions
+6. Verify visualizations are responsive and render correctly on different screen sizes
