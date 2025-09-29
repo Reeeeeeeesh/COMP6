@@ -54,8 +54,10 @@ async def trigger_batch_calculation(
     if not batch_upload:
         raise HTTPException(status_code=404, detail=f"Batch upload with ID {upload_id} not found")
     
-    # Check if batch upload is in a valid state
-    if batch_upload.status not in ["uploaded", "completed", "failed"]:
+    # Check if batch upload is in a valid state. In some environments, a prior
+    # attempt may have left the status as 'processing' without an active task.
+    # Allow recalculation by treating 'processing' as recoverable here.
+    if batch_upload.status not in ["uploaded", "completed", "failed", "processing"]:
         return ApiResponse(
             success=False,
             error=f"Batch upload is currently in {batch_upload.status} state and cannot be calculated"
@@ -65,55 +67,39 @@ async def trigger_batch_calculation(
         # Update status to indicate processing will start
         batch_upload.status = "processing"
         db.commit()
-        
-        # Create a background task wrapper that creates its own database session
+
+        # Prefer synchronous execution to ensure a result ID is available immediately.
+        # This keeps UX predictable in environments where background tasks may not run.
+        calculation_service = BatchCalculationService(db)
+        batch_result, _ = await calculation_service.calculate_batch(
+            upload_id,
+            parameters,
+            create_scenario,
+            scenario_name
+        )
+
+        if batch_result:
+            return ApiResponse(
+                success=True,
+                message="Batch calculation completed",
+                data={"batch_result_id": batch_result.id, "status": "completed"}
+            )
+
+        # Fallback: if for any reason a result wasn't produced, enqueue background task
         def background_calculation_task():
-            """Background task wrapper that creates its own database session"""
             import asyncio
             from ..database import SessionLocal
             task_db = SessionLocal()
             try:
-                logger.info(f"=== BACKGROUND TASK STARTED for upload {upload_id} ===")
-                logger.info(f"Parameters: {parameters}")
-                logger.info(f"Create scenario: {create_scenario}")
-                logger.info(f"Scenario name: {scenario_name}")
-                
-                calculation_service = BatchCalculationService(task_db)
-                logger.info("BatchCalculationService created, calling calculate_batch...")
-                
-                # Run the async function in a new event loop
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                try:
-                    batch_result, employee_results = loop.run_until_complete(
-                        calculation_service.calculate_batch(
-                            upload_id,
-                            parameters,
-                            create_scenario,
-                            scenario_name
-                        )
-                    )
-                    logger.info(f"=== BACKGROUND CALCULATION COMPLETED for upload {upload_id} ===")
-                    logger.info(f"Batch result ID: {batch_result.id if batch_result else 'None'}")
-                    logger.info(f"Employee results count: {len(employee_results) if employee_results else 0}")
-                finally:
-                    loop.close()
-            except Exception as e:
-                logger.exception(f"=== BACKGROUND CALCULATION FAILED for upload {upload_id} ===")
-                logger.exception(f"Error details: {str(e)}")
-                # The calculate_batch method already handles updating the status to failed
+                loop.run_until_complete(BatchCalculationService(task_db).calculate_batch(upload_id, parameters, create_scenario, scenario_name))
             finally:
-                logger.info(f"=== BACKGROUND TASK CLEANUP for upload {upload_id} ===")
+                loop.close()
                 task_db.close()
-        
-        # Start calculation in background task
+
         background_tasks.add_task(background_calculation_task)
-        
-        return ApiResponse(
-            success=True,
-            message="Batch calculation started in background",
-            data={"upload_id": upload_id, "status": "processing"}
-        )
+        return ApiResponse(success=True, message="Batch calculation started in background", data={"upload_id": upload_id, "status": "processing"})
             
     except ValueError as e:
         logger.error(f"Validation error in batch calculation: {str(e)}")
@@ -202,6 +188,18 @@ async def get_batch_calculation_result(
         "calculated_at": result.calculated_at.isoformat() if result.calculated_at else None,
         "calculation_parameters": result.calculation_parameters
     }
+
+    # Add payout and exceptions summary
+    try:
+        from ..services.batch_calculation_service import BatchCalculationService as _BCS
+        svc = _BCS(db)
+        enhanced = svc.get_batch_summary_with_exceptions(result.id)
+        result_dict.update({
+            'payout_generated': enhanced.get('payout', {}).get('generated', False),
+            'exception_counts': enhanced.get('exceptions', {}).get('by_severity', {})
+        })
+    except Exception:
+        pass
     
     return ApiResponse(
         success=True,
@@ -219,6 +217,7 @@ async def get_employee_calculation_results(
     sort_order: str = "asc",
     filter_dept: Optional[str] = None,
     search: Optional[str] = None,
+    include_payout: bool = False,
     db: Session = Depends(get_db)
 ):
     """
@@ -310,6 +309,9 @@ async def get_employee_calculation_results(
 
     # Convert SQLAlchemy models to dictionaries for JSON serialization
     employee_results_data = []
+    from ..dal.payout_dal import PayoutLegDAL
+    leg_dal = PayoutLegDAL(db) if include_payout else None
+
     for emp_result in employee_results:
         result_dict = {
             "id": emp_result.id,
@@ -333,6 +335,19 @@ async def get_employee_calculation_results(
                 "hire_date": emp_result.employee_data.hire_date.isoformat() if emp_result.employee_data and emp_result.employee_data.hire_date else None
             } if emp_result.employee_data else None
         }
+        if include_payout and leg_dal:
+            legs = leg_dal.get_by_employee_result(emp_result.id)
+            result_dict["payout_legs"] = [
+                {
+                    "leg_number": l.leg_number,
+                    "amount": l.amount,
+                    "instrument": l.instrument,
+                    "grant_date": l.grant_date.isoformat() if l.grant_date else None,
+                    "vest_date": l.vest_date.isoformat() if l.vest_date else None,
+                    "retention_end_date": l.retention_end_date.isoformat() if l.retention_end_date else None,
+                    "status": l.status
+                } for l in legs
+            ]
         employee_results_data.append(result_dict)
     
     return ApiResponse(
@@ -340,6 +355,17 @@ async def get_employee_calculation_results(
         message=f"Found {len(employee_results)} employee results",
         data=employee_results_data
     )
+
+
+@router.get("/results/{result_id}/enhanced-summary", response_model=ApiResponse)
+async def get_enhanced_summary(result_id: str, db: Session = Depends(get_db)):
+    try:
+        from ..services.batch_calculation_service import BatchCalculationService as _BCS
+        svc = _BCS(db)
+        data = svc.get_batch_summary_with_exceptions(result_id)
+        return ApiResponse(success=True, data=data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/results/{result_id}/summary", response_model=ApiResponse)

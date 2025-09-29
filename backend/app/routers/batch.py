@@ -87,35 +87,47 @@ async def upload_batch_file(
             file_size=len(file_content)
         )
         
-        # Save file temporarily and process
+        # Save file temporarily and kick off background processing to avoid long-held request
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
                 temp_file.write(file_content)
                 temp_file_path = temp_file.name
-            
-            # Process file in background (for now, process synchronously)
-            success, message = file_service.process_file(upload.id, file_content)
-            
-            # Clean up temp file
-            os.unlink(temp_file_path)
-            
-            if not success:
-                return ApiResponse(
-                    success=False,
-                    message="File processing failed",
-                    error=message
-                )
-            
-            # Get updated upload record
+
+            # Launch processing in a background thread using a fresh DB session
+            import threading
+            from ..database import SessionLocal
+
+            def _process_async(upload_id: str, _temp_path: str):
+                db_bg = SessionLocal()
+                try:
+                    with open(_temp_path, 'rb') as f:
+                        content = f.read()
+                    fs = FileProcessingService(db_bg)
+                    fs.process_file(upload_id, content)
+                except Exception as e:  # Log and continue; errors are reflected in DB status
+                    logger.error(f"Background processing failed for upload {upload_id}: {e}")
+                    try:
+                        BatchUploadDAL(db_bg).mark_as_failed(upload_id, str(e))
+                    except Exception as mark_err:
+                        logger.error(f"Failed to mark upload as failed: {mark_err}")
+                finally:
+                    try:
+                        os.unlink(_temp_path)
+                    except Exception:
+                        pass
+                    db_bg.close()
+
+            threading.Thread(target=_process_async, args=(upload.id, temp_file_path), daemon=True).start()
+
+            # Respond immediately; client can poll /uploads/{id}/columns
             updated_upload = batch_dal.get(upload.id)
-            
             return ApiResponse(
                 success=True,
-                message="File uploaded and processed successfully",
+                message="File uploaded successfully. Processing started in background.",
                 data={
                     "upload": BatchUploadResponse.model_validate(updated_upload),
                     "validation_warnings": validation_result.warnings,
-                    "processing_message": message
+                    "processing_message": "processing"
                 }
             )
             

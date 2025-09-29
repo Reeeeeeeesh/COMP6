@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL as BASE_URL } from '../config';
+import { apiClient } from './apiClient';
 
 const API_BASE_URL = `${BASE_URL}/api/v1/plan-management`;
 
@@ -72,145 +73,99 @@ export interface WorkflowStatus {
 // Plan Management APIs
 export const getPlans = async (status?: string): Promise<BonusPlan[]> => {
   const url = status ? `${API_BASE_URL}/plans?status=${status}` : `${API_BASE_URL}/plans`;
-  const response = await fetch(url);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch plans: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<BonusPlan[]> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.get(url);
+  const result: ApiResponse<{ plans?: BonusPlan[] }> = response.data;
+
+  if (!result.success && !result.data?.plans) {
     throw new Error(result.message || 'Failed to fetch plans');
   }
-  
-  return result.data;
+
+  return result.data?.plans ?? [];
 };
 
 export const getPlan = async (planId: string): Promise<BonusPlan> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch plan: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<BonusPlan> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.get(`${API_BASE_URL}/plans/${planId}`);
+  const result: ApiResponse<{ plan?: BonusPlan }> = response.data;
+
+  const plan = result.data?.plan;
+  if (!plan) {
     throw new Error(result.message || 'Failed to fetch plan');
   }
-  
-  return result.data;
+
+  return plan;
 };
 
 export const createPlan = async (planData: Partial<BonusPlan>): Promise<BonusPlan> => {
-  const response = await fetch(`${API_BASE_URL}/plans`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(planData),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to create plan: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<BonusPlan> = await response.json();
-  if (!result.success) {
+  // Add required fields that the backend expects
+  const createData = {
+    ...planData,
+    version: 1, // New plans start at version 1
+    tenant_id: 'default', // Use default tenant for now
+    status: planData.status || 'draft'
+  };
+
+  const response = await apiClient.post(`${API_BASE_URL}/plans`, createData);
+  const result: ApiResponse<{ plan?: BonusPlan }> = response.data;
+
+  const plan = result.data?.plan;
+  if (!plan) {
     throw new Error(result.message || 'Failed to create plan');
   }
-  
-  return result.data;
+
+  return plan;
 };
 
 export const updatePlan = async (planId: string, planData: Partial<BonusPlan>): Promise<BonusPlan> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(planData),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to update plan: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<BonusPlan> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.put(`${API_BASE_URL}/plans/${planId}`, planData);
+  const result: ApiResponse<{ plan?: BonusPlan }> = response.data;
+
+  const plan = result.data?.plan;
+  if (!plan) {
     throw new Error(result.message || 'Failed to update plan');
   }
-  
-  return result.data;
+
+  return plan;
 };
 
 // Plan Steps APIs
 export const getPlanSteps = async (planId: string): Promise<PlanStep[]> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/steps`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch plan steps: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<PlanStep[]> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.get(`${API_BASE_URL}/plans/${planId}/steps`);
+  const result: ApiResponse<{ steps?: PlanStep[] }> = response.data;
+
+  if (!result.success && !result.data?.steps) {
     throw new Error(result.message || 'Failed to fetch plan steps');
   }
-  
-  return result.data;
+
+  return result.data?.steps ?? [];
 };
 
 export const createPlanStep = async (planId: string, stepData: Partial<PlanStep>): Promise<PlanStep> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/steps`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(stepData),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to create plan step: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<PlanStep> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.post(`${API_BASE_URL}/plans/${planId}/steps`, stepData);
+  const result: ApiResponse<{ step?: PlanStep }> = response.data;
+
+  const step = result.data?.step;
+  if (!step) {
     throw new Error(result.message || 'Failed to create plan step');
   }
-  
-  return result.data;
+
+  return step;
 };
 
 export const updatePlanStep = async (stepId: string, stepData: Partial<PlanStep>): Promise<PlanStep> => {
-  const response = await fetch(`${API_BASE_URL}/steps/${stepId}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(stepData),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to update plan step: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<PlanStep> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.put(`${API_BASE_URL}/steps/${stepId}`, stepData);
+  const result: ApiResponse<{ step?: PlanStep }> = response.data;
+
+  const step = result.data?.step;
+  if (!step) {
     throw new Error(result.message || 'Failed to update plan step');
   }
-  
-  return result.data;
+
+  return step;
 };
 
 export const deletePlanStep = async (stepId: string): Promise<void> => {
-  const response = await fetch(`${API_BASE_URL}/steps/${stepId}`, {
-    method: 'DELETE',
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to delete plan step: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse = await response.json();
+  const response = await apiClient.delete(`${API_BASE_URL}/steps/${stepId}`);
+  const result: ApiResponse = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to delete plan step');
   }
@@ -218,81 +173,48 @@ export const deletePlanStep = async (stepId: string): Promise<void> => {
 
 // Expression Validation APIs
 export const validateExpression = async (planId: string, expression: string, stepOrder?: number): Promise<ExpressionValidation> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/validate-expression`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ expression, step_order: stepOrder }),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to validate expression: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<ExpressionValidation> = await response.json();
-  if (!result.success) {
+  const response = await apiClient.post(
+    `${API_BASE_URL}/plans/${planId}/validate-expression`,
+    { expression, step_order: stepOrder }
+  );
+  const result: ApiResponse<ExpressionValidation> = response.data;
+
+  if (!result.data) {
     throw new Error(result.message || 'Failed to validate expression');
   }
-  
-  return result.data;
+
+  return {
+    ...result.data,
+    valid: Boolean(result.data.valid),
+    variables: result.data.variables || [],
+  };
 };
 
 // Workflow APIs  
 export const approvePlan = async (planId: string, userId: string, notes?: string): Promise<any> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/approve?user_id=${userId}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ notes }),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to approve plan: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse = await response.json();
+  const response = await apiClient.post(`${API_BASE_URL}/plans/${planId}/approve?user_id=${userId}`, { notes });
+  const result: ApiResponse = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to approve plan');
   }
-  
   return result.data;
 };
 
 export const lockPlan = async (planId: string, userId: string, notes?: string): Promise<any> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/lock?user_id=${userId}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ notes }),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to lock plan: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse = await response.json();
+  const response = await apiClient.post(`${API_BASE_URL}/plans/${planId}/lock?user_id=${userId}`, { notes });
+  const result: ApiResponse = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to lock plan');
   }
-  
   return result.data;
 };
 
 export const getWorkflowStatus = async (planId: string): Promise<WorkflowStatus> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/workflow-status`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get workflow status: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<WorkflowStatus> = await response.json();
+  const response = await apiClient.get(`${API_BASE_URL}/plans/${planId}/workflow-status`);
+  const result: ApiResponse<WorkflowStatus> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to get workflow status');
   }
-  
   return result.data;
 };
 
@@ -323,23 +245,11 @@ export const executePlanWithTape = async (planId: string, precisionMode: string 
   if (uploadId) {
     url.searchParams.append('upload_id', uploadId);
   }
-
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to execute plan with tape: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse = await response.json();
+  const response = await apiClient.post(url.toString());
+  const result: ApiResponse = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to execute plan with tape');
   }
-  
   return result.data;
 };
 
@@ -348,33 +258,20 @@ export const getCalculationTape = async (planId: string, runId: string, employee
   if (employeeRef) {
     url.searchParams.append('employee_ref', employeeRef);
   }
-
-  const response = await fetch(url.toString());
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get calculation tape: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<CalculationTape> = await response.json();
+  const response = await apiClient.get(url.toString());
+  const result: ApiResponse<CalculationTape> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to get calculation tape');
   }
-  
   return result.data;
 };
 
 export const getStepResults = async (planId: string, runId: string, stepName: string): Promise<any> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/runs/${runId}/step-results/${stepName}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get step results: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse = await response.json();
+  const response = await apiClient.get(`${API_BASE_URL}/plans/${planId}/runs/${runId}/step-results/${stepName}`);
+  const result: ApiResponse = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to get step results');
   }
-  
   return result.data;
 };
 
@@ -410,17 +307,11 @@ export interface SnapshotHashInfo {
 }
 
 export const getSnapshotSummary = async (planId: string): Promise<SnapshotSummary> => {
-  const response = await fetch(`${API_BASE_URL}/plans/${planId}/snapshot-summary`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get snapshot summary: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<SnapshotSummary> = await response.json();
+  const response = await apiClient.get(`${API_BASE_URL}/plans/${planId}/snapshot-summary`);
+  const result: ApiResponse<SnapshotSummary> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to get snapshot summary');
   }
-  
   return result.data;
 };
 
@@ -428,32 +319,19 @@ export const verifyReproducibility = async (planId: string, expectedHash: string
   const url = new URL(`${API_BASE_URL}/plans/${planId}/verify-reproducibility`);
   url.searchParams.append('expected_hash', expectedHash);
   url.searchParams.append('precision_mode', precisionMode);
-
-  const response = await fetch(url.toString(), { method: 'POST' });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to verify reproducibility: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<ReproducibilityVerification> = await response.json();
+  const response = await apiClient.post(url.toString());
+  const result: ApiResponse<ReproducibilityVerification> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to verify reproducibility');
   }
-  
   return result.data;
 };
 
 export const getRunSnapshotHash = async (runId: string): Promise<SnapshotHashInfo> => {
-  const response = await fetch(`${API_BASE_URL}/runs/${runId}/snapshot-hash`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to get snapshot hash: ${response.status} ${response.statusText}`);
-  }
-  
-  const result: ApiResponse<SnapshotHashInfo> = await response.json();
+  const response = await apiClient.get(`${API_BASE_URL}/runs/${runId}/snapshot-hash`);
+  const result: ApiResponse<SnapshotHashInfo> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to get snapshot hash');
   }
-  
   return result.data;
 };

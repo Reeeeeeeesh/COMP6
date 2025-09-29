@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config';
+import apiClient from './apiClient';
 
 export interface PoolVsTargetAnalysis {
   plan_id: string;
@@ -118,19 +119,8 @@ class ExecutiveReportingService {
     request: DynamicReportRequest,
     tenantId: string
   ): Promise<DynamicReportResponse> {
-    const response = await fetch(`${this.baseUrl}/dynamic-report?tenant_id=${tenantId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to generate dynamic report: ${response.statusText}`);
-    }
-
-    const result = await response.json();
+    const response = await apiClient.post(`${this.baseUrl}/dynamic-report?tenant_id=${tenantId}`, request);
+    const result = response.data;
     if (!result.success) {
       throw new Error(result.error || 'Failed to generate dynamic report');
     }
@@ -156,13 +146,8 @@ class ExecutiveReportingService {
     if (options.dateTo) params.append('date_to', options.dateTo);
     if (options.planIds?.length) params.append('plan_ids', options.planIds.join(','));
 
-    const response = await fetch(`${this.baseUrl}/pool-analysis?${params}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch pool analysis: ${response.statusText}`);
-    }
-
-    const result = await response.json();
+    const response = await apiClient.get(`${this.baseUrl}/pool-analysis?${params}`);
+    const result = response.data;
     if (!result.success) {
       throw new Error(result.error || 'Failed to get pool analysis');
     }
@@ -188,13 +173,8 @@ class ExecutiveReportingService {
     if (options.dateTo) params.append('date_to', options.dateTo);
     if (options.planIds?.length) params.append('plan_ids', options.planIds.join(','));
 
-    const response = await fetch(`${this.baseUrl}/trends?${params}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch trend analysis: ${response.statusText}`);
-    }
-
-    const result = await response.json();
+    const response = await apiClient.get(`${this.baseUrl}/trends?${params}`);
+    const result = response.data;
     if (!result.success) {
       throw new Error(result.error || 'Failed to get trend analysis');
     }
@@ -218,13 +198,8 @@ class ExecutiveReportingService {
     if (options.dateTo) params.append('date_to', options.dateTo);
     if (options.planIds?.length) params.append('plan_ids', options.planIds.join(','));
 
-    const response = await fetch(`${this.baseUrl}/executive-summary?${params}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch executive summary: ${response.statusText}`);
-    }
-
-    const result = await response.json();
+    const response = await apiClient.get(`${this.baseUrl}/executive-summary?${params}`);
+    const result = response.data;
     if (!result.success) {
       throw new Error(result.error || 'Failed to get executive summary');
     }
@@ -257,13 +232,8 @@ class ExecutiveReportingService {
     if (options.dateTo) params.append('date_to', options.dateTo);
     if (options.planIds?.length) params.append('plan_ids', options.planIds.join(','));
 
-    const response = await fetch(`${this.baseUrl}/combined-report?${params}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch combined report: ${response.statusText}`);
-    }
-
-    const result = await response.json();
+    const response = await apiClient.get(`${this.baseUrl}/combined-report?${params}`);
+    const result = response.data;
     if (!result.success) {
       throw new Error(result.error || 'Failed to get combined report');
     }
@@ -281,13 +251,8 @@ class ExecutiveReportingService {
       days: days.toString(),
     });
 
-    const response = await fetch(`${this.baseUrl}/plan-performance/${planId}?${params}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch plan performance metrics: ${response.statusText}`);
-    }
-
-    const result = await response.json();
+    const response = await apiClient.get(`${this.baseUrl}/plan-performance/${planId}?${params}`);
+    const result = response.data;
     if (!result.success) {
       throw new Error(result.error || 'Failed to get plan performance metrics');
     }

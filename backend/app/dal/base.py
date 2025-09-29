@@ -6,8 +6,8 @@ from ..database import Base
 ModelType = TypeVar("ModelType", bound=Base)
 
 class BaseDAL(Generic[ModelType]):
-    """Base Data Access Layer class with common CRUD operations"""
-    
+    """Base Data Access Layer class with common CRUD operations."""
+
     def __init__(self, model: Type[ModelType], db: Session):
         self.model = model
         self.db = db
@@ -23,6 +23,11 @@ class BaseDAL(Generic[ModelType]):
     def get(self, id: str) -> Optional[ModelType]:
         """Get a record by ID"""
         return self.db.query(self.model).filter(self.model.id == id).first()
+
+    # Compatibility alias – many services still reference get_by_id
+    def get_by_id(self, id: str) -> Optional[ModelType]:
+        """Alias for get() to maintain backward compatibility."""
+        return self.get(id)
     
     def get_multi(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
         """Get multiple records with pagination"""

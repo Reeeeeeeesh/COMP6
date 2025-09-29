@@ -41,6 +41,8 @@ class SafeDSLParser:
         ast.Call,         # Function calls (whitelisted functions only)
         ast.List,         # List literals [a, b, c] for functions like sum()
         ast.Tuple,        # Tuple literals (a, b, c) for functions
+        ast.Dict,         # Dict literals for mappings/metrics
+        ast.Subscript,    # Dict indexing e.g., metrics['kpi']
         ast.Load,         # Variable loading context
         ast.Store,        # Variable storing context (for completeness)
         
@@ -72,6 +74,11 @@ class SafeDSLParser:
         
         # Safe built-ins
         'pow': pow,
+
+        # Conditional helpers
+        'when': lambda cond, a, b: a if cond else b,
+        'lookup': lambda key, mapping: mapping.get(key) if isinstance(mapping, dict) else None,
+        'in_range': lambda v, lo, hi: (v >= lo) and (v <= hi),
     }
     
     def __init__(self):
@@ -281,6 +288,18 @@ class SafeDSLParser:
                 # Only count variables being loaded, not function names
                 if not self._is_function_name(node, tree):
                     variables.add(node.id)
+            elif isinstance(node, ast.Subscript):
+                # Recognize metrics['kpi'] pattern
+                try:
+                    if isinstance(node.value, ast.Name) and node.value.id == 'metrics':
+                        key_node = node.slice
+                        # Python 3.8 compatibility
+                        if hasattr(ast, 'Index') and isinstance(key_node, ast.Index):
+                            key_node = key_node.value
+                        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                            variables.add(f"metrics.{key_node.value}")
+                except Exception:
+                    pass
         
         return variables
     
@@ -411,6 +430,22 @@ class SafeDSLParser:
             elif isinstance(node, ast.Call):
                 # Function calls
                 return self._evaluate_function_call(node, variables)
+            
+            elif isinstance(node, ast.Dict):
+                keys = [self._evaluate_ast_node(k, variables) for k in node.keys]
+                vals = [self._evaluate_ast_node(v, variables) for v in node.values]
+                return dict(zip(keys, vals))
+            
+            elif isinstance(node, ast.Subscript):
+                container = self._evaluate_ast_node(node.value, variables)
+                key_node = node.slice
+                if hasattr(ast, 'Index') and isinstance(key_node, ast.Index):
+                    key_node = key_node.value
+                key = self._evaluate_ast_node(key_node, variables)
+                try:
+                    return container[key]
+                except Exception as e:
+                    raise ExpressionEvaluationError(f"Subscript access failed: {e}")
             
             elif isinstance(node, (ast.List, ast.Tuple)):
                 # List or tuple literals [a, b, c] or (a, b, c)

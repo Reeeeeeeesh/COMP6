@@ -1,9 +1,10 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Float, JSON, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Float, JSON, Numeric, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
 import uuid
 
 from .database import Base
@@ -141,10 +142,15 @@ class EmployeeCalculationResult(Base):
     
     # Metadata
     calculated_at = Column(DateTime, default=func.now())
+    payout_generated = Column(Boolean, nullable=False, default=False)
     
     # Relationships
     employee_data = relationship("EmployeeData", back_populates="calculation_results")
     batch_result = relationship("BatchCalculationResult", back_populates="employee_results")
+    payout_legs = relationship("PayoutLeg", back_populates="employee_result", cascade="all, delete-orphan")
+
+    def has_payouts(self) -> bool:
+        return bool(self.payout_legs)
 
 class ImportTemplate(Base):
     """Model for storing CSV import templates"""
@@ -404,11 +410,119 @@ class PlatformUpload(Base):
     status = Column(String, nullable=False, default="received")  # received, processing, failed, ready
     file_size = Column(Integer)
     upload_metadata = Column(JSON, nullable=False, default=lambda: {})
+    
+    # File storage and integrity columns
+    bytes_hash = Column(String, nullable=True, index=True)  # SHA-256 checksum for file integrity
+    storage_path = Column(String, nullable=True, index=True)  # Path to stored file
+    lineage_metadata = Column(JSON, nullable=True, default=lambda: {})  # File lineage tracking
+    
     created_at = Column(DateTime, nullable=False, default=func.now())
     
     # Relationships
     employee_rows = relationship("EmployeeRow", back_populates="upload", cascade="all, delete-orphan")
     plan_runs = relationship("PlanRun", back_populates="upload")
+    
+    def verify_file_integrity(self, file_store) -> bool:
+        """
+        Verify file integrity using stored checksum.
+        
+        Args:
+            file_store: FileStore instance for verification
+            
+        Returns:
+            bool: True if file integrity is verified, False otherwise
+        """
+        if not self.bytes_hash or not self.storage_path:
+            return False
+        
+        try:
+            return file_store.verify_checksum(self.storage_path, self.bytes_hash)
+        except Exception:
+            return False
+    
+    def get_lineage_info(self) -> dict:
+        """
+        Get file lineage information.
+        
+        Returns:
+            dict: Lineage metadata with processing history
+        """
+        return self.lineage_metadata or {}
+    
+    def update_lineage(self, event_type: str, details: dict):
+        """
+        Update file lineage with new event.
+        
+        Args:
+            event_type: Type of lineage event (e.g., 'upload', 'validation', 'processing')
+            details: Event details to record
+        """
+        if not self.lineage_metadata:
+            self.lineage_metadata = {"events": []}
+        
+        if "events" not in self.lineage_metadata:
+            self.lineage_metadata["events"] = []
+        
+        self.lineage_metadata["events"].append({
+            "type": event_type,
+            "timestamp": datetime.utcnow().isoformat(),
+            "details": details
+        })
+
+
+# ==============================================
+# Connector Models
+# ==============================================
+
+class ConnectorConfig(Base):
+    """External connector configuration (HRIS/Payroll/DWH)."""
+    __tablename__ = "connector_config"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    connector_type = Column(String, nullable=False, index=True)  # hris, payroll, dwh
+    system_name = Column(String, nullable=False, index=True)     # workday, adp, snowflake
+    config_json = Column(JSON, nullable=False, default=lambda: {})
+    enabled = Column(Boolean, nullable=False, default=False)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    tenant = relationship("Tenant")
+    creator = relationship("User")
+    runs = relationship("ConnectorRun", back_populates="config", cascade="all, delete-orphan")
+
+    def is_enabled(self) -> bool:
+        return bool(self.enabled)
+
+    def get_decrypted_config(self) -> Dict[str, Any]:
+        # Placeholder for secret management integration; returns config_json as-is
+        return self.config_json or {}
+
+    def get_last_successful_run(self):
+        if not self.runs:
+            return None
+        completed = [r for r in self.runs if r.status == 'completed']
+        return sorted(completed, key=lambda r: r.finished_at or r.started_at)[-1] if completed else None
+
+
+class ConnectorRun(Base):
+    """Connector run execution record for extracts and deliveries."""
+    __tablename__ = "connector_run"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    config_id = Column(String, ForeignKey("connector_config.id"), nullable=False, index=True)
+    run_type = Column(String, nullable=False)  # extract, deliver
+    status = Column(String, nullable=False, default='running')  # running, completed, failed
+    started_at = Column(DateTime, nullable=False, default=func.now())
+    finished_at = Column(DateTime, nullable=True)
+    records_processed = Column(Integer, nullable=True)
+    output_file_id = Column(String, ForeignKey("platform_uploads.id"), nullable=True)
+    error_message = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+
+    config = relationship("ConnectorConfig", back_populates="runs")
+    output_file = relationship("PlatformUpload")
 
 
 class EmployeeRow(Base):
@@ -491,3 +605,412 @@ class AuditEvent(Base):
     
     # Relationships
     actor = relationship("User", back_populates="audit_events")
+
+
+# ==============================================
+# Team RAF Models
+# ==============================================
+
+class RAFConfig(Base):
+    """Configuration for team RAF calculation."""
+    __tablename__ = "raf_config"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    team_id = Column(String, ForeignKey("teams.id"), nullable=False)
+    cycle = Column(String, nullable=False)  # e.g., "2025", "2025-Q2"
+    method = Column(String, nullable=False)  # "CAGR_3Y", "AVG_YOY_3Y"
+    include_perf_fees = Column(Boolean, nullable=False, default=False)
+    const_currency = Column(Boolean, nullable=False, default=False)
+    cap_factor = Column(Float, nullable=True)  # Upper limit for RAF factor
+    floor_factor = Column(Float, nullable=True)  # Lower limit for RAF factor
+    weight_pct = Column(Float, nullable=False, default=100.0)  # Weight percentage in calculation
+    status = Column(String, nullable=False, default="draft")  # draft, approved, locked
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    approved_by = Column(String, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    rationale = Column(Text, nullable=True)  # Approval rationale
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    team = relationship("Team", backref="raf_configs")
+    creator = relationship("User", foreign_keys=[created_by])
+    approver = relationship("User", foreign_keys=[approved_by])
+    snapshots = relationship("RAFSnapshot", back_populates="config", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        # Ensure only one active config per team and cycle
+        {'schema': None},
+    )
+
+
+class RAFSnapshot(Base):
+    """Immutable snapshot of RAF calculation for audit and evidence."""
+    __tablename__ = "raf_snapshot"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    team_id = Column(String, ForeignKey("teams.id"), nullable=False)
+    config_id = Column(String, ForeignKey("raf_config.id"), nullable=False)
+    cycle = Column(String, nullable=False)
+    method = Column(String, nullable=False)  # "CAGR_3Y", "AVG_YOY_3Y"
+    computed_factor = Column(Float, nullable=False)
+    adjustments_json = Column(JSON, nullable=True)  # Detailed calculation steps
+    inputs_hash = Column(String, nullable=False, index=True)  # Hash of input data for reproducibility
+    cap_applied = Column(Boolean, nullable=False, default=False)
+    floor_applied = Column(Boolean, nullable=False, default=False)
+    approver_ids = Column(JSON, nullable=True)  # List of approver user IDs
+    approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    team = relationship("Team", backref="raf_snapshots")
+    config = relationship("RAFConfig", back_populates="snapshots")
+    
+    __table_args__ = (
+        # Ensure only one approved snapshot per team and cycle
+        {'schema': None},
+    )
+    
+    def verify_calculation(self, team_raf_service):
+        """
+        Verify that the calculation is reproducible with current inputs.
+        
+        Args:
+            team_raf_service: Service for recalculating RAF
+            
+        Returns:
+            bool: True if calculation is reproducible, False otherwise
+        """
+        try:
+            recalculated = team_raf_service.recalculate_from_snapshot(self)
+            return abs(recalculated - self.computed_factor) < 0.0001
+        except Exception:
+            return False
+
+
+class TeamRevenueData(Base):
+    """Detailed team revenue data for RAF calculations."""
+    __tablename__ = "team_revenue_data"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    team_id = Column(String, ForeignKey("teams.id"), nullable=False)
+    fiscal_year = Column(Integer, nullable=False)
+    reported_revenue = Column(Float, nullable=False)
+    organic_revenue = Column(Float, nullable=True)  # Excluding acquisitions
+    currency = Column(String, nullable=False)
+    perf_fee_component = Column(Float, nullable=True)  # Performance fee portion
+    notes = Column(Text, nullable=True)
+    file_id = Column(String, nullable=True)  # Reference to source file
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Relationships
+    team = relationship("Team", backref="revenue_data")
+    
+    __table_args__ = (
+        # Ensure only one revenue entry per team and fiscal year
+        {'schema': None},
+    )
+
+
+class OrgMembership(Base):
+    """Employee-team membership tracking."""
+    __tablename__ = "org_membership"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    employee_id = Column(String, nullable=False, index=True)
+    team_code = Column(String, nullable=False, index=True)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=True)  # Null means currently active
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    def is_active(self, reference_date=None):
+        """
+        Check if membership is active at reference date.
+        
+        Args:
+            reference_date: Date to check against (default: current date)
+            
+        Returns:
+            bool: True if membership is active, False otherwise
+        """
+        if reference_date is None:
+            reference_date = datetime.utcnow()
+            
+        return (self.start_date <= reference_date and 
+                (self.end_date is None or reference_date <= self.end_date))
+
+
+class FXRate(Base):
+    """Foreign exchange rates for currency conversion."""
+    __tablename__ = "fx_rates"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    from_currency = Column(String(3), nullable=False, index=True)  # ISO 4217 code (e.g., 'EUR')
+    to_currency = Column(String(3), nullable=False, index=True)    # ISO 4217 code (e.g., 'USD')
+    fiscal_year = Column(Integer, nullable=False, index=True)       # Year the rate applies to
+    rate = Column(Float, nullable=False)                           # Exchange rate (1 from_currency = rate * to_currency)
+    source = Column(String, nullable=True)                         # Rate source (e.g., 'ECB', 'Reuters', 'Manual')
+    effective_date = Column(DateTime, nullable=True)               # Date when rate was effective
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        # Ensure only one rate per currency pair per fiscal year
+        {'schema': None},
+    )
+
+
+# ==============================================
+# Evidence Pack Models
+# ==============================================
+
+class EvidencePack(Base):
+    """Evidence pack metadata for audit and compliance purposes."""
+    __tablename__ = "evidence_packs"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    plan_run_id = Column(String, ForeignKey("plan_runs.id"), nullable=False, index=True)
+    pack_filename = Column(String, nullable=False)
+    pack_checksum = Column(String, nullable=False, index=True)  # SHA-256 checksum of the ZIP file
+    file_size = Column(Integer, nullable=False)
+    storage_path = Column(String, nullable=False)  # Path to stored ZIP file
+    
+    # Pack metadata
+    pack_version = Column(String, nullable=False, default="1.1")
+    compliance_standards = Column(JSON, nullable=False, default=lambda: ["SOX", "MiFID II", "GDPR"])
+    audit_requirements = Column(JSON, nullable=False, default=lambda: ["reproducibility", "data_lineage", "approval_trail"])
+    
+    # Content summary
+    contents_summary = Column(JSON, nullable=False, default=lambda: {})  # Summary of what's included
+    
+    # Generation metadata
+    generated_by = Column(String, ForeignKey("users.id"), nullable=True)
+    generated_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # Verification status
+    verified_at = Column(DateTime, nullable=True)
+    verification_status = Column(String, nullable=True)  # "pending", "verified", "failed"
+    verification_notes = Column(JSON, nullable=True)
+    
+    # Retention and lifecycle
+    expires_at = Column(DateTime, nullable=True)  # When pack can be deleted
+    archived_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    plan_run = relationship("PlanRun", backref="evidence_packs")
+    generator = relationship("User", foreign_keys=[generated_by])
+    
+    __table_args__ = (
+        {'schema': None},
+    )
+    
+    def is_verified(self) -> bool:
+        """Check if evidence pack has been verified."""
+        return self.verification_status == "verified"
+    
+    def is_expired(self) -> bool:
+        """Check if evidence pack has expired."""
+        if not self.expires_at:
+            return False
+        return datetime.utcnow() > self.expires_at
+    
+    def get_retention_days_remaining(self) -> Optional[int]:
+        """Get number of days until pack expires."""
+        if not self.expires_at:
+            return None
+        delta = self.expires_at - datetime.utcnow()
+        return max(0, delta.days)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "plan_run_id": self.plan_run_id,
+            "pack_filename": self.pack_filename,
+            "pack_checksum": self.pack_checksum,
+            "file_size": self.file_size,
+            "pack_version": self.pack_version,
+            "compliance_standards": self.compliance_standards,
+            "contents_summary": self.contents_summary,
+            "generated_at": self.generated_at.isoformat() if self.generated_at else None,
+            "generated_by": self.generated_by,
+            "verification_status": self.verification_status,
+            "verified_at": self.verified_at.isoformat() if self.verified_at else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "retention_days_remaining": self.get_retention_days_remaining()
+        }
+
+
+# ==============================================
+# Payout Policy, Payout Legs, and Exceptions
+# ==============================================
+
+class PayoutPolicy(Base):
+    """Defines how bonuses are split into payout/vesting legs."""
+    __tablename__ = "payout_policy"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    cycle = Column(String, nullable=False, index=True)  # e.g., "2025" or "2025-Q4"
+    population = Column(String, nullable=False, index=True)  # 'MRT' or 'non-MRT'
+    rules_json = Column(JSON, nullable=False)  # { tranches: [{pct, instrument, grant_offset_days, vest_offset_days, retention_offset_days, currency}] }
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default="draft")  # draft, pending_approval, active, archived
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    approved_by = Column(String, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+    creator = relationship("User", foreign_keys=[created_by])
+    approver = relationship("User", foreign_keys=[approved_by])
+
+    __table_args__ = (
+        Index("ix_payout_policy_cycle_population", "cycle", "population"),
+    )
+
+    def is_active(self) -> bool:
+        return self.status == "active"
+
+    def validate_tranches(self) -> bool:
+        """Validate that tranche percentages sum to 100 and fields are present."""
+        try:
+            tranches: List[Dict[str, Any]] = (self.rules_json or {}).get("tranches", [])
+            pct_sum = sum(float(t.get("percentage", 0)) for t in tranches)
+            # Allow tiny floating error
+            return abs(pct_sum - 100.0) < 1e-6 and all("instrument" in t for t in tranches)
+        except Exception:
+            return False
+
+
+class PayoutLeg(Base):
+    """Single payout/vesting leg created from an employee's final bonus."""
+    __tablename__ = "payout_legs"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    employee_calculation_result_id = Column(String, ForeignKey("employee_calculation_results.id"), nullable=False, index=True)
+    leg_number = Column(Integer, nullable=False)
+    amount = Column(Float, nullable=False)
+    instrument = Column(String, nullable=False)  # cash, fund_units, phantom
+    grant_date = Column(DateTime, nullable=True)
+    vest_date = Column(DateTime, nullable=True)
+    retention_end_date = Column(DateTime, nullable=True)
+    currency = Column(String, nullable=True)
+    policy_version = Column(Integer, nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending, granted, vested, cancelled, exported
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+    employee_result = relationship("EmployeeCalculationResult", back_populates="payout_legs")
+    # Amendments relationship added for malus/clawback tracking
+    amendments = relationship("PayoutLegAmendment", back_populates="original_leg", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_payout_legs_emp_result", "employee_calculation_result_id"),
+        Index("ix_payout_legs_status", "status"),
+        Index("ix_payout_legs_grant_date", "grant_date"),
+    )
+
+    def has_amendments(self) -> bool:
+        return bool(self.amendments)
+
+    def get_current_amount(self) -> float:
+        """Return latest adjusted amount if amended, else original amount."""
+        if not self.amendments:
+            return float(self.amount or 0)
+        # Use the latest amendment by created_at
+        latest = sorted(self.amendments, key=lambda a: a.created_at or datetime.utcnow())[-1]
+        return float(latest.adjusted_amount)
+
+
+class ExceptionEvent(Base):
+    """Structured exception record for batch calculation, team RAF, and validations."""
+    __tablename__ = "exception_events"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    source = Column(String, nullable=False, index=True)  # batch_calculation, team_raf, validation
+    reference_id = Column(String, nullable=True, index=True)  # e.g., batch_result_id, employee_result_id
+    exception_code = Column(String, nullable=False, index=True)
+    severity = Column(String, nullable=False, default="warning")  # warning, error, critical
+    status = Column(String, nullable=False, default="open")  # open, acknowledged, resolved
+    context_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    resolved_by = Column(String, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+
+    resolver = relationship("User", foreign_keys=[resolved_by])
+
+    __table_args__ = (
+        Index("ix_exception_source_ref", "source", "reference_id"),
+        Index("ix_exception_status", "status"),
+        Index("ix_exception_severity", "severity"),
+    )
+
+
+# ==============================================
+# Risk Events (Malus/Clawback) and Amendments
+# ==============================================
+
+class RiskEvent(Base):
+    """Risk event for malus/clawback decisions affecting payouts."""
+    __tablename__ = "risk_events"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    employee_id = Column(String, nullable=False, index=True)
+    cycle = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False)  # conduct_breach, risk_threshold, manual_adjustment
+    occurred_at = Column(DateTime, nullable=False, default=func.now())
+    decision = Column(String, nullable=False)  # malus, clawback, waive
+    amount_or_percentage = Column(Float, nullable=False)
+    is_percentage = Column(Boolean, nullable=False, default=False)
+    currency = Column(String, nullable=True)
+    rationale = Column(Text, nullable=True)
+    approver_id = Column(String, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending, approved, applied
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+    approver = relationship("User")
+    amendments = relationship("PayoutLegAmendment", back_populates="risk_event")
+
+    VALID_EVENT_TYPES = {"conduct_breach", "risk_threshold", "manual_adjustment"}
+    VALID_DECISIONS = {"malus", "clawback", "waive"}
+    VALID_STATUSES = {"pending", "approved", "applied"}
+
+    def is_valid(self) -> bool:
+        if self.event_type not in self.VALID_EVENT_TYPES:
+            return False
+        if self.decision not in self.VALID_DECISIONS:
+            return False
+        if self.status not in self.VALID_STATUSES:
+            return False
+        if self.is_percentage and not (0 <= float(self.amount_or_percentage) <= 100):
+            return False
+        return True
+
+
+class PayoutLegAmendment(Base):
+    """Amendments to payout legs due to malus or clawback events."""
+    __tablename__ = "payout_leg_amendments"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    original_leg_id = Column(String, ForeignKey("payout_legs.id"), nullable=False, index=True)
+    risk_event_id = Column(String, ForeignKey("risk_events.id"), nullable=False)
+    amendment_type = Column(String, nullable=False)  # malus_reduction, clawback_recovery
+    original_amount = Column(Float, nullable=False)
+    adjusted_amount = Column(Float, nullable=False)
+    effective_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+    original_leg = relationship("PayoutLeg", back_populates="amendments")
+    risk_event = relationship("RiskEvent", back_populates="amendments")
+
+    VALID_AMENDMENT_TYPES = {"malus_reduction", "clawback_recovery"}
+
+    def is_valid(self) -> bool:
+        if self.amendment_type not in self.VALID_AMENDMENT_TYPES:
+            return False
+        try:
+            return float(self.adjusted_amount) >= 0
+        except Exception:
+            return False

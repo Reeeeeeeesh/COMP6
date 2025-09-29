@@ -23,6 +23,17 @@ import {
   Card,
   CardContent,
   CardActions,
+  Tooltip,
+  IconButton,
+  Stepper,
+  Step,
+  StepLabel,
+  StepContent,
+  Collapse,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  Divider,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -31,8 +42,12 @@ import {
   DragIndicator as DragIcon,
   CheckCircle as ValidIcon,
   Error as ErrorIcon,
+  Help as HelpIcon,
+  Info as InfoIcon,
+  LightbulbOutlined as TipIcon,
+  Code as CodeIcon,
 } from '@mui/icons-material';
-import Editor from '@monaco-editor/react';
+// Removed Monaco editor - using TextField for better compatibility
 import {
   BonusPlan,
   PlanStep,
@@ -45,16 +60,25 @@ import {
   validateExpression,
   ExpressionValidation,
 } from '../../services/planManagementService';
+import { PlanBuilderHelp } from './PlanBuilderHelp';
+
+// Removed Monaco Error Boundary - using simple TextField editor
 
 const PlanBuilderMain: React.FC = () => {
   // State Management
   const [plans, setPlans] = useState<BonusPlan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<BonusPlan | null>(null);
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+  const [helpDialog, setHelpDialog] = useState(false);
   const [selectedStep, setSelectedStep] = useState<PlanStep | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
+  // Debug logging for component lifecycle
+  console.log('🔧 PlanBuilderMain: Component rendering, loading:', loading, 'error:', error);
+  console.log('🔧 PlanBuilderMain: Plans state:', plans, 'type:', typeof plans, 'isArray:', Array.isArray(plans));
+  console.log('🔧 PlanBuilderMain: PlanSteps state:', planSteps, 'type:', typeof planSteps, 'isArray:', Array.isArray(planSteps));
+
   // Dialog State
   const [createPlanDialog, setCreatePlanDialog] = useState(false);
   const [editStepDialog, setEditStepDialog] = useState(false);
@@ -67,11 +91,15 @@ const PlanBuilderMain: React.FC = () => {
   const [stepOutputs, setStepOutputs] = useState('');
   const [stepDescription, setStepDescription] = useState('');
   const [validationResult, setValidationResult] = useState<ExpressionValidation | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const [dialogFullyOpen, setDialogFullyOpen] = useState(false);
 
   // Load initial data
   useEffect(() => {
     loadPlans();
   }, []);
+
+  // Removed Monaco loader initialization - using simple TextField editor
 
   // Load plan steps when plan selection changes
   useEffect(() => {
@@ -80,21 +108,68 @@ const PlanBuilderMain: React.FC = () => {
     }
   }, [selectedPlan]);
 
+  // Handle dialog state changes
+  useEffect(() => {
+    if (editStepDialog) {
+      // Dialog is opening - start initialization process
+      console.log('🚀 Dialog opening, starting Monaco initialization...');
+      setDialogFullyOpen(false);
+      setEditorReady(false);
+      
+      // Progressive initialization with multiple fallbacks
+      setTimeout(() => {
+        setDialogFullyOpen(true);
+        console.log('✅ Dialog marked as fully open');
+      }, 100);
+      
+      setTimeout(() => {
+        setEditorReady(true);
+        console.log('✅ Editor marked as ready (primary)');
+      }, 500);
+      
+      // Ultimate fallback
+      setTimeout(() => {
+        setEditorReady(true);
+        console.log('🔄 Editor forced ready (fallback)');
+      }, 2000);
+      
+    } else {
+      // Dialog is closing - reset states
+      setEditorReady(false);
+      setDialogFullyOpen(false);
+      console.log('❌ Dialog closed, resetting editor states');
+    }
+  }, [editStepDialog]);
+
   const loadPlans = async () => {
     try {
+      console.log('🔧 PlanBuilderMain: Starting to load plans...');
       setLoading(true);
+      setError(null); // Clear any previous errors
+
       const fetchedPlans = await getPlans();
-      setPlans(fetchedPlans);
-      
+      console.log('🔧 PlanBuilderMain: Fetched plans:', fetchedPlans);
+      console.log('🔧 PlanBuilderMain: Fetched plans type:', typeof fetchedPlans);
+      console.log('🔧 PlanBuilderMain: Is array?', Array.isArray(fetchedPlans));
+
+      // Defensive programming - ensure we always have an array
+      const plansArray = Array.isArray(fetchedPlans) ? fetchedPlans : [];
+      console.log('🔧 PlanBuilderMain: Using plans array:', plansArray);
+
+      setPlans(plansArray);
+
       // Auto-select first draft plan
-      const draftPlan = fetchedPlans.find(p => p.status === 'draft');
+      const draftPlan = plansArray.find(p => p.status === 'draft');
       if (draftPlan) {
+        console.log('🔧 PlanBuilderMain: Selected draft plan:', draftPlan);
         setSelectedPlan(draftPlan);
       }
     } catch (err) {
+      console.error('❌ PlanBuilderMain: Failed to load plans:', err);
       setError(`Failed to load plans: ${err}`);
     } finally {
       setLoading(false);
+      console.log('🔧 PlanBuilderMain: Load plans completed');
     }
   };
 
@@ -107,82 +182,8 @@ const PlanBuilderMain: React.FC = () => {
     }
   };
 
-  const handleCreatePlan = async () => {
-    try {
-      const newPlan = await createPlan({
-        name: newPlanName,
-        notes: newPlanNotes,
-        status: 'draft',
-      });
-      
-      setPlans([...plans, newPlan]);
-      setSelectedPlan(newPlan);
-      setCreatePlanDialog(false);
-      setNewPlanName('');
-      setNewPlanNotes('');
-    } catch (err) {
-      setError(`Failed to create plan: ${err}`);
-    }
-  };
 
-  const handleCreateStep = () => {
-    setSelectedStep(null);
-    setStepName('');
-    setStepExpression('');
-    setStepOutputs('');
-    setStepDescription('');
-    setValidationResult(null);
-    setEditStepDialog(true);
-  };
 
-  const handleEditStep = (step: PlanStep) => {
-    setSelectedStep(step);
-    setStepName(step.name);
-    setStepExpression(step.expression);
-    setStepOutputs(step.outputs.join(', '));
-    setStepDescription(step.description || '');
-    setValidationResult(null);
-    setEditStepDialog(true);
-  };
-
-  const handleSaveStep = async () => {
-    if (!selectedPlan) return;
-
-    try {
-      const stepData = {
-        name: stepName,
-        expression: stepExpression,
-        outputs: stepOutputs.split(',').map(s => s.trim()).filter(s => s),
-        description: stepDescription,
-        step_order: selectedStep?.step_order || planSteps.length + 1,
-      };
-
-      if (selectedStep) {
-        // Update existing step
-        await updatePlanStep(selectedStep.id, stepData);
-      } else {
-        // Create new step
-        await createPlanStep(selectedPlan.id, stepData);
-      }
-
-      // Reload steps
-      await loadPlanSteps(selectedPlan.id);
-      setEditStepDialog(false);
-    } catch (err) {
-      setError(`Failed to save step: ${err}`);
-    }
-  };
-
-  const handleDeleteStep = async (stepId: string) => {
-    if (!confirm('Are you sure you want to delete this step?')) return;
-
-    try {
-      await deletePlanStep(stepId);
-      await loadPlanSteps(selectedPlan!.id);
-    } catch (err) {
-      setError(`Failed to delete step: ${err}`);
-    }
-  };
 
   // Real-time expression validation
   const validateExpressionDebounced = useCallback(
@@ -216,6 +217,99 @@ const PlanBuilderMain: React.FC = () => {
     validateExpressionDebounced(expression);
   };
 
+  // Handler Functions
+  const handleCreatePlan = async () => {
+    try {
+      console.log('🔧 Creating new plan:', newPlanName);
+      const newPlan = await createPlan({
+        name: newPlanName,
+        notes: newPlanNotes,
+        status: 'draft',
+      });
+
+      setPlans(prev => [...prev, newPlan]);
+      setSelectedPlan(newPlan);
+      setCreatePlanDialog(false);
+      setNewPlanName('');
+      setNewPlanNotes('');
+    } catch (err) {
+      console.error('❌ Failed to create plan:', err);
+      setError(`Failed to create plan: ${err}`);
+    }
+  };
+
+  const handleCreateStep = () => {
+    console.log('🔧 Opening create step dialog');
+    setSelectedStep(null);
+    setStepName('');
+    setStepExpression('');
+    setStepOutputs('');
+    setStepDescription('');
+    setValidationResult(null);
+    setEditStepDialog(true);
+  };
+
+  const handleEditStep = (step: PlanStep) => {
+    console.log('🔧 Opening edit step dialog for:', step);
+    setSelectedStep(step);
+    setStepName(step.name);
+    setStepExpression(step.expression);
+    setStepOutputs(step.outputs.join(', '));
+    setStepDescription(step.description || '');
+    setValidationResult(null);
+    setEditStepDialog(true);
+  };
+
+  const handleDeleteStep = async (stepId: string) => {
+    try {
+      console.log('🔧 Deleting step:', stepId);
+      await deletePlanStep(stepId);
+      setPlanSteps(prev => prev.filter(step => step.id !== stepId));
+    } catch (err) {
+      console.error('❌ Failed to delete step:', err);
+      setError(`Failed to delete step: ${err}`);
+    }
+  };
+
+  const handleSaveStep = async () => {
+    if (!selectedPlan) return;
+
+    try {
+      console.log('🔧 Saving step:', selectedStep ? 'update' : 'create');
+      const outputs = stepOutputs.split(',').map(o => o.trim()).filter(o => o);
+
+      if (selectedStep) {
+        // Update existing step
+        const updatedStep = await updatePlanStep(selectedStep.id, {
+          name: stepName,
+          expression: stepExpression,
+          outputs: outputs,
+          description: stepDescription,
+        });
+
+        setPlanSteps(prev => prev.map(step =>
+          step.id === selectedStep.id ? updatedStep : step
+        ));
+      } else {
+        // Create new step
+        const newStep = await createPlanStep(selectedPlan.id, {
+          name: stepName,
+          expression: stepExpression,
+          outputs: outputs,
+          description: stepDescription,
+          step_order: planSteps.length + 1,
+        });
+
+        setPlanSteps(prev => [...prev, newStep]);
+      }
+
+      setEditStepDialog(false);
+    } catch (err) {
+      console.error('❌ Failed to save step:', err);
+      setError(`Failed to save step: ${err}`);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'draft': return 'default';
@@ -234,11 +328,46 @@ const PlanBuilderMain: React.FC = () => {
     );
   }
 
+  if (error) {
+    console.error('🔧 PlanBuilderMain: Rendering error state:', error);
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <Typography variant="h6">Error Loading Plan Builder</Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>{error}</Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            sx={{ mt: 2 }}
+            onClick={() => {
+              setError(null);
+              loadPlans();
+            }}
+          >
+            Retry
+          </Button>
+        </Alert>
+      </Box>
+    );
+  }
+
+  console.log('🔧 PlanBuilderMain: Rendering main component, plans:', plans.length);
+
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Bonus Plan Builder
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+        <Typography variant="h4" component="h1">
+          Bonus Plan Builder
+        </Typography>
+        <Button 
+          variant="outlined" 
+          startIcon={<HelpIcon />}
+          onClick={() => setHelpDialog(true)}
+          size="large"
+        >
+          Help & Examples
+        </Button>
+      </Stack>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -263,7 +392,7 @@ const PlanBuilderMain: React.FC = () => {
             </Stack>
 
             <List dense>
-              {plans.map((plan) => (
+              {(Array.isArray(plans) ? plans : []).map((plan) => (
                 <ListItem
                   key={plan.id}
                   component="div"
@@ -322,7 +451,7 @@ const PlanBuilderMain: React.FC = () => {
 
               {planSteps.length > 0 ? (
                 <List>
-                  {planSteps.map((step, index) => (
+                  {(Array.isArray(planSteps) ? planSteps : []).map((step, index) => (
                     <Card key={step.id} sx={{ mb: 2 }}>
                       <CardContent>
                         <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
@@ -421,25 +550,84 @@ const PlanBuilderMain: React.FC = () => {
       </Dialog>
 
       {/* Edit Step Dialog */}
-      <Dialog open={editStepDialog} onClose={() => setEditStepDialog(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>
-          {selectedStep ? 'Edit Plan Step' : 'Create Plan Step'}
+      <Dialog 
+        open={editStepDialog} 
+        onClose={() => {
+          setEditStepDialog(false);
+          setDialogFullyOpen(false);
+        }} 
+        maxWidth="lg" 
+        fullWidth
+        TransitionProps={{
+          onEntered: () => {
+            console.log('📝 Dialog fully opened, enabling Monaco...');
+            setDialogFullyOpen(true);
+            // Give more time for Monaco to initialize and the dialog animation to complete
+            setTimeout(() => {
+              setEditorReady(true);
+              console.log('✅ Editor ready after dialog opened');
+            }, 300);
+            
+            // Fallback: Force editor ready after a longer delay if it's still not ready
+            setTimeout(() => {
+              setEditorReady(true);
+              console.log('🔄 Fallback: Force setting editor ready');
+            }, 1000);
+          },
+          onExited: () => {
+            setDialogFullyOpen(false);
+            setEditorReady(false);
+          }
+        }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <CodeIcon color="primary" />
+            <Typography variant="h6">
+              {selectedStep ? 'Edit Plan Step' : 'Create New Plan Step'}
+            </Typography>
+            <Tooltip title="Plan steps define the calculation logic for your bonus plan. Each step processes data and passes results to the next step.">
+              <IconButton size="small">
+                <HelpIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <DialogContent sx={{ overflow: 'visible' }}>
+          {/* Getting Started Guide */}
+          <Alert severity="info" sx={{ mb: 3 }} icon={<TipIcon />}>
+            <Typography variant="subtitle2" gutterBottom>
+              💡 How to Create a Plan Step
+            </Typography>
+            <Typography variant="body2">
+              <strong>1.</strong> Give your step a clear name (e.g., "Base Salary Calculation")<br/>
+              <strong>2.</strong> Write what it calculates in the description<br/>
+              <strong>3.</strong> Create an expression using variables like <code>base_salary</code>, <code>performance_rating</code><br/>
+              <strong>4.</strong> Define output variables that other steps can use
+            </Typography>
+          </Alert>
+
+          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
                 label="Step Name"
                 value={stepName}
                 onChange={(e) => setStepName(e.target.value)}
                 fullWidth
+                required
+                placeholder="e.g., Base Salary Calculation"
+                helperText="Choose a clear, descriptive name for this calculation step"
+                InputProps={{
+                  startAdornment: stepName && <ValidIcon color="success" fontSize="small" sx={{ mr: 1 }} />
+                }}
               />
               <TextField
-                label="Output Variables (comma-separated)"
+                label="Output Variables"
                 value={stepOutputs}
                 onChange={(e) => setStepOutputs(e.target.value)}
                 fullWidth
-                placeholder="e.g., bonus_amount, adjusted_bonus"
+                placeholder="e.g., base_bonus, commission"
+                helperText="Variables that other steps can use (comma-separated)"
               />
             </Box>
             <TextField
@@ -449,58 +637,176 @@ const PlanBuilderMain: React.FC = () => {
               fullWidth
               multiline
               rows={2}
+              placeholder="Explain what this step calculates and why it's needed"
+              helperText="Help others understand the purpose of this calculation"
+              InputProps={{
+                startAdornment: stepDescription && <ValidIcon color="success" fontSize="small" sx={{ mr: 1 }} />
+              }}
             />
             <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                Expression (use Monaco editor below)
-              </Typography>
-              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                <Editor
-                  height="200px"
-                  defaultLanguage="javascript"
-                  value={stepExpression}
-                  onChange={handleExpressionChange}
-                  options={{
-                    minimap: { enabled: false },
-                    lineNumbers: 'on',
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    theme: 'vs-light',
-                  }}
-                />
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                <Typography variant="subtitle2">
+                  Calculation Expression
+                </Typography>
+                <Tooltip title="Use JavaScript-style syntax with mathematical operations, conditions, and functions">
+                  <IconButton size="small">
+                    <InfoIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+
+              {/* Expression Examples */}
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  💡 Common Expression Patterns:
+                </Typography>
+                <Box component="pre" sx={{ fontSize: '0.875rem', fontFamily: 'monospace', m: 0, whiteSpace: 'pre-wrap' }}>
+                  <Typography variant="body2" component="div">
+                    <code>• Basic calculation: base_salary * 0.05</code><br/>
+                    <code>• Conditional logic: if(performance {'>'}= 80, bonus_rate * sales, 0)</code><br/>
+                    <code>• Min/Max limits: min(calculated_bonus, max_bonus_cap)</code><br/>
+                    <code>• Multiple conditions: if(tenure {'>'}= 2, extra_bonus, base_bonus)</code>
+                  </Typography>
+                </Box>
+              </Alert>
+
+              <Box sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                minHeight: '280px',
+                width: '100%',
+                position: 'relative',
+                backgroundColor: '#f5f5f5'
+              }}>
+                {dialogFullyOpen && editorReady ? (
+                  <TextField
+                    multiline
+                    rows={10}
+                    fullWidth
+                    value={stepExpression || ''}
+                    onChange={(e) => handleExpressionChange(e.target.value)}
+                    placeholder="// Enter your calculation expression here
+// Examples:
+base_salary * 0.1
+
+// Conditional bonus based on performance
+if(performance_rating >= 85, base_salary * 0.15, base_salary * 0.05)
+
+// Multi-tier commission structure
+if(sales_amount >= 100000, sales_amount * 0.05, 
+   if(sales_amount >= 50000, sales_amount * 0.03, sales_amount * 0.01))"
+                    variant="outlined"
+                    sx={{
+                      '& .MuiInputBase-root': {
+                        fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                        fontSize: '14px',
+                        lineHeight: 1.4,
+                      },
+                      '& .MuiInputBase-input': {
+                        resize: 'vertical',
+                      },
+                    }}
+                    InputProps={{
+                      style: {
+                        backgroundColor: '#f8f9fa',
+                        border: '1px solid #e9ecef',
+                      }
+                    }}
+                  />
+                ) : (
+                  <Box sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '280px',
+                    color: 'text.secondary',
+                    backgroundColor: '#f9f9f9',
+                    border: '1px dashed #ccc',
+                    borderRadius: 1,
+                    gap: 1
+                  }}>
+                    <Typography variant="body2">
+                      {!dialogFullyOpen ? '⏳ Initializing dialog...' : '📝 Preparing expression editor...'}
+                    </Typography>
+                    <Typography variant="caption" color="text.disabled">
+                      Ready in just a moment
+                    </Typography>
+                  </Box>
+                )}
               </Box>
               
               {validationResult && (
                 <Alert
                   severity={validationResult.valid ? 'success' : 'error'}
-                  sx={{ mt: 1 }}
+                  sx={{ mt: 2 }}
                   icon={validationResult.valid ? <ValidIcon /> : <ErrorIcon />}
                 >
                   {validationResult.valid ? (
-                    <>
-                      Expression is valid! Variables: {validationResult.variables.join(', ') || 'none'}
-                    </>
+                    <Box>
+                      <Typography variant="subtitle2" gutterBottom>
+                        ✅ Expression is valid!
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Variables detected:</strong> {validationResult.variables.length > 0 ? validationResult.variables.join(', ') : 'none'}
+                      </Typography>
+                    </Box>
                   ) : (
-                    <>
-                      {validationResult.error}
-                    </>
+                    <Box>
+                      <Typography variant="subtitle2" gutterBottom>
+                        ❌ Expression Error
+                      </Typography>
+                      <Typography variant="body2">
+                        {validationResult.error}
+                      </Typography>
+                    </Box>
                   )}
                 </Alert>
               )}
             </Box>
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditStepDialog(false)}>Cancel</Button>
-          <Button
-            onClick={handleSaveStep}
-            variant="contained"
-            disabled={!stepName.trim() || !stepExpression.trim() || (validationResult != null && !validationResult.valid)}
-          >
-            Save Step
-          </Button>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Stack direction="row" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
+            <Button 
+              onClick={() => setEditStepDialog(false)}
+              variant="outlined"
+              size="large"
+            >
+              Cancel
+            </Button>
+            <Box sx={{ flexGrow: 1 }} />
+            {(!stepName.trim() || !stepExpression.trim()) && (
+              <Typography variant="caption" color="warning.main" sx={{ mr: 2 }}>
+                ⚠️ Please fill in step name and expression
+              </Typography>
+            )}
+            <Button
+              onClick={handleSaveStep}
+              variant="contained"
+              size="large"
+              disabled={!stepName.trim() || !stepExpression.trim() || (validationResult != null && !validationResult.valid)}
+              startIcon={validationResult?.valid ? <ValidIcon /> : undefined}
+              sx={{
+                minWidth: '120px',
+                bgcolor: validationResult?.valid ? 'success.main' : 'primary.main',
+                '&:hover': {
+                  bgcolor: validationResult?.valid ? 'success.dark' : 'primary.dark',
+                }
+              }}
+            >
+              {selectedStep ? 'Update Step' : 'Save Step'}
+            </Button>
+          </Stack>
         </DialogActions>
       </Dialog>
+
+      {/* Help Dialog */}
+      <PlanBuilderHelp 
+        open={helpDialog} 
+        onClose={() => setHelpDialog(false)} 
+      />
     </Box>
   );
 };

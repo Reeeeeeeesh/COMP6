@@ -23,6 +23,8 @@ import xlsxwriter
 from xlsxwriter.workbook import Workbook
 
 from ..models import EmployeeData, EmployeeCalculationResult, RunStepResult, PlanRun, BonusPlan
+from ..dal.payout_dal import PayoutLegDAL
+from ..dal.risk_event_dal import RiskEventDAL, PayoutLegAmendmentDAL
 from ..schemas import BonusStatementData, BonusStatementRequest
 
 logger = logging.getLogger(__name__)
@@ -290,6 +292,95 @@ class BonusStatementService:
                 ('BACKGROUND', (0, 0), (-1, 0), Color(0.8, 0.8, 0.8))
             ]))
             story.append(steps_table)
+
+        # Vesting Schedule Section (if payout legs exist)
+        try:
+            leg_dal = PayoutLegDAL(self.db)
+            # Find latest calc result for employee_ref
+            er = self.db.query(EmployeeCalculationResult).join(EmployeeData, EmployeeData.id == EmployeeCalculationResult.employee_data_id).filter(
+                EmployeeData.employee_id == data.employee_ref
+            ).order_by(EmployeeCalculationResult.calculated_at.desc()).first()
+            if er:
+                legs = leg_dal.get_by_employee_result(er.id)
+                if legs:
+                    story.append(Spacer(1, 0.3*inch))
+                    story.append(Paragraph("Vesting Schedule", header_style))
+                    vest_rows = [["Leg", "Amount", "Instrument", "Grant Date", "Vest Date", "Retention End"]]
+                    for leg in legs:
+                        vest_rows.append([
+                            str(leg.leg_number),
+                            f"${leg.amount:,.2f}",
+                            leg.instrument,
+                            leg.grant_date.strftime('%Y-%m-%d') if leg.grant_date else '-',
+                            leg.vest_date.strftime('%Y-%m-%d') if leg.vest_date else '-',
+                            leg.retention_end_date.strftime('%Y-%m-%d') if leg.retention_end_date else '-',
+                        ])
+                    vest_table = Table(vest_rows, colWidths=[0.6*inch, 1.2*inch, 1.2*inch, 1.1*inch, 1.1*inch, 1.3*inch])
+                    vest_table.setStyle(TableStyle([
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 9),
+                        ('GRID', (0, 0), (-1, -1), 0.5, lightgrey),
+                        ('BACKGROUND', (0, 0), (-1, 0), Color(0.8, 0.8, 0.8))
+                    ]))
+                    story.append(vest_table)
+        except Exception as e:
+            logger.warning(f"Failed to render vesting schedule: {e}")
+
+        # Risk Events and Amendments Sections
+        try:
+            ev_dal = RiskEventDAL(self.db)
+            amd_dal = PayoutLegAmendmentDAL(self.db)
+            # Cycle unknown from data; attempt from calculation_date year
+            cycle_guess = str(data.calculation_date.year)
+            events = ev_dal.get_by_employee_and_cycle(data.employee_ref, cycle_guess)
+            if events:
+                story.append(Spacer(1, 0.3*inch))
+                story.append(Paragraph("Risk Events", header_style))
+                rows = [["Date", "Type", "Decision", "Amount", "Pct", "Status"]]
+                for e in events:
+                    rows.append([
+                        e.occurred_at.strftime('%Y-%m-%d') if e.occurred_at else '-',
+                        e.event_type,
+                        e.decision,
+                        f"{e.amount_or_percentage:,.2f}" if not e.is_percentage else '-',
+                        f"{e.amount_or_percentage:.2f}%" if e.is_percentage else '-',
+                        e.status,
+                    ])
+                tbl = Table(rows, colWidths=[1.0*inch,1.4*inch,1.2*inch,1.2*inch,1.0*inch,1.0*inch])
+                tbl.setStyle(TableStyle([
+                    ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                    ('GRID',(0,0),(-1,-1),0.5, lightgrey),
+                    ('BACKGROUND',(0,0),(-1,0), Color(0.8,0.8,0.8))
+                ]))
+                story.append(tbl)
+
+                # Amendment history
+                story.append(Spacer(1, 0.3*inch))
+                story.append(Paragraph("Amendment History", header_style))
+                amd_rows = [["Leg", "Original", "Adjusted", "Effective", "Type"]]
+                if er:
+                    legs = leg_dal.get_by_employee_result(er.id)
+                    for lg in legs:
+                        for amd in amd_dal.get_by_leg_id(lg.id):
+                            amd_rows.append([
+                                str(lg.leg_number),
+                                f"${amd.original_amount:,.2f}",
+                                f"${amd.adjusted_amount:,.2f}",
+                                amd.effective_date.strftime('%Y-%m-%d') if amd.effective_date else '-',
+                                amd.amendment_type
+                            ])
+                a_tbl = Table(amd_rows, colWidths=[0.6*inch,1.2*inch,1.2*inch,1.2*inch,1.4*inch])
+                a_tbl.setStyle(TableStyle([
+                    ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                    ('ALIGN',(1,1),(2,-1),'RIGHT'),
+                    ('GRID',(0,0),(-1,-1),0.5, lightgrey),
+                    ('BACKGROUND',(0,0),(-1,0), Color(0.8,0.8,0.8))
+                ]))
+                story.append(a_tbl)
+        except Exception as e:
+            logger.warning(f"Failed to render risk/amendments: {e}")
         
         # Footer
         story.append(Spacer(1, 0.5*inch))
@@ -445,7 +536,88 @@ class BonusStatementService:
                 
                 worksheet.write(row, 2, value_info.get('type', 'unknown'))
                 row += 1
+
+        # Vesting Schedule worksheet if payout legs exist
+        try:
+            leg_dal = PayoutLegDAL(self.db)
+            er = self.db.query(EmployeeCalculationResult).join(EmployeeData, EmployeeData.id == EmployeeCalculationResult.employee_data_id).filter(
+                EmployeeData.employee_id == data.employee_ref
+            ).order_by(EmployeeCalculationResult.calculated_at.desc()).first()
+            if er:
+                legs = leg_dal.get_by_employee_result(er.id)
+                if legs:
+                    vs = workbook.add_worksheet('Vesting Schedule')
+                    vs.set_column('A:F', 18)
+                    vs.write(0, 0, 'Leg', label_format)
+                    vs.write(0, 1, 'Amount', label_format)
+                    vs.write(0, 2, 'Instrument', label_format)
+                    vs.write(0, 3, 'Grant Date', label_format)
+                    vs.write(0, 4, 'Vest Date', label_format)
+                    vs.write(0, 5, 'Retention End', label_format)
+                    r = 1
+                    for leg in legs:
+                        vs.write(r, 0, leg.leg_number)
+                        vs.write(r, 1, leg.amount, currency_format)
+                        vs.write(r, 2, leg.instrument)
+                        vs.write(r, 3, leg.grant_date.strftime('%Y-%m-%d') if leg.grant_date else '-')
+                        vs.write(r, 4, leg.vest_date.strftime('%Y-%m-%d') if leg.vest_date else '-')
+                        vs.write(r, 5, leg.retention_end_date.strftime('%Y-%m-%d') if leg.retention_end_date else '-')
+                        r += 1
+        except Exception as e:
+            logger.warning(f"Failed to render vesting sheet: {e}")
         
+        # Risk events + Amendments worksheet
+        try:
+            ev_dal = RiskEventDAL(self.db)
+            amd_dal = PayoutLegAmendmentDAL(self.db)
+            cycle_guess = str(data.calculation_date.year)
+            events = ev_dal.get_by_employee_and_cycle(data.employee_ref, cycle_guess)
+            if events:
+                ws = workbook.add_worksheet('Risk & Amendments')
+                ws.set_column('A:F', 20)
+                ws.write(0, 0, 'Date', label_format)
+                ws.write(0, 1, 'Type', label_format)
+                ws.write(0, 2, 'Decision', label_format)
+                ws.write(0, 3, 'Amount', label_format)
+                ws.write(0, 4, 'Percentage', label_format)
+                ws.write(0, 5, 'Status', label_format)
+                r = 1
+                for e in events:
+                    ws.write(r, 0, e.occurred_at.strftime('%Y-%m-%d') if e.occurred_at else '-')
+                    ws.write(r, 1, e.event_type)
+                    ws.write(r, 2, e.decision)
+                    ws.write(r, 3, e.amount_or_percentage if not e.is_percentage else None, currency_format)
+                    ws.write(r, 4, (e.amount_or_percentage/100.0) if e.is_percentage else None, percentage_format)
+                    ws.write(r, 5, e.status)
+                    r += 1
+
+                # Amendments
+                vs = workbook.add_worksheet('Amendments')
+                vs.set_column('A:E', 18)
+                vs.write(0, 0, 'Leg', label_format)
+                vs.write(0, 1, 'Original', label_format)
+                vs.write(0, 2, 'Adjusted', label_format)
+                vs.write(0, 3, 'Effective', label_format)
+                vs.write(0, 4, 'Type', label_format)
+                rr = 1
+                # Find latest calc result for employee
+                leg_dal = PayoutLegDAL(self.db)
+                er = self.db.query(EmployeeCalculationResult).join(EmployeeData, EmployeeData.id == EmployeeCalculationResult.employee_data_id).filter(
+                    EmployeeData.employee_id == data.employee_ref
+                ).order_by(EmployeeCalculationResult.calculated_at.desc()).first()
+                if er:
+                    legs = leg_dal.get_by_employee_result(er.id)
+                    for lg in legs:
+                        for amd in amd_dal.get_by_leg_id(lg.id):
+                            vs.write(rr, 0, lg.leg_number)
+                            vs.write(rr, 1, amd.original_amount, currency_format)
+                            vs.write(rr, 2, amd.adjusted_amount, currency_format)
+                            vs.write(rr, 3, amd.effective_date.strftime('%Y-%m-%d') if amd.effective_date else '-')
+                            vs.write(rr, 4, amd.amendment_type)
+                            rr += 1
+        except Exception as e:
+            logger.warning(f"Failed to render risk/amendments worksheets: {e}")
+
         # Footer
         row += 2
         footer_text = f"Generated on {datetime.utcnow().strftime('%B %d, %Y at %I:%M %p')} using {data.plan_name} v{data.plan_version}"

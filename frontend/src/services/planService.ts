@@ -15,10 +15,174 @@ import {
   PlanCollaborator,
   CollaboratorRole,
   PlanVersion,
+  PlanSettings,
+  PlanStructure,
+  PlanUsageStats,
+  PlanCalculation,
+  PlanField,
+  PlanOutput,
+  PlanStatus,
+  PlanType,
 } from '../types/planTypes';
 
+const DEFAULT_PLAN_SETTINGS: PlanSettings = {
+  timezone: 'UTC',
+  currency: 'USD',
+  decimalPlaces: 2,
+  roundingMethod: 'nearest',
+  dateFormat: 'YYYY-MM-DD',
+  enableAuditLog: true,
+  allowCollaboration: false,
+  autoSave: false,
+};
+
+const EMPTY_STRUCTURE: PlanStructure = {
+  fields: [],
+  calculations: [],
+  conditions: [],
+  outputs: [],
+};
+
+const EMPTY_USAGE: PlanUsageStats = {
+  totalExecutions: 0,
+  lastExecuted: undefined,
+  averageExecutionTime: 0,
+  errorRate: 0,
+  mostUsedBy: [],
+};
+
+const normalizeStatus = (status?: string): PlanStatus => {
+  switch ((status || 'draft').toLowerCase()) {
+    case 'draft':
+      return 'draft';
+    case 'approved':
+    case 'locked':
+    case 'active':
+      return 'active';
+    case 'archived':
+      return 'archived';
+    case 'inactive':
+      return 'inactive';
+    case 'testing':
+      return 'testing';
+    default:
+      return 'draft';
+  }
+};
+
+const normalizeType = (rawType?: string): PlanType => {
+  const type = (rawType || '').toLowerCase();
+  if (type === 'commission' || type === 'bonus' || type === 'incentive' || type === 'hybrid') {
+    return type;
+  }
+  return 'bonus';
+};
+
+const mapStepsToCalculations = (steps: any[]): PlanCalculation[] =>
+  Array.isArray(steps)
+    ? steps.map((step, index) => ({
+        id: step?.id ?? `step-${index}`,
+        name: step?.name ?? `Step ${index + 1}`,
+        expression: step?.expr ?? '',
+        description: step?.notes ?? '',
+        dependencies: [],
+        outputType: 'number',
+        order: step?.step_order ?? index,
+      }))
+    : [];
+
+const mapStepsToOutputs = (steps: any[]): PlanOutput[] => {
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  return steps.flatMap((step, stepIndex) => {
+    const calculationId = step?.id ?? `step-${stepIndex}`;
+    return Array.isArray(step?.outputs)
+      ? step.outputs.map((outputName: string, outputIndex: number) => ({
+          id: `${calculationId}-${outputName}`,
+          name: outputName,
+          label: outputName,
+          calculationId,
+          format: { type: 'number' },
+          displayOrder: outputIndex,
+        }))
+      : [];
+  });
+};
+
+const mapInputsToFields = (inputs: any[]): PlanField[] =>
+  Array.isArray(inputs)
+    ? inputs.map((input, index) => ({
+        id: input?.id ?? `input-${index}`,
+        name: input?.input_id ?? input?.id ?? `input_${index + 1}`,
+        label: input?.label ?? input?.input_id ?? `Input ${index + 1}`,
+        type: 'number',
+        required: Boolean(input?.required),
+        defaultValue: input?.source_mapping?.default ?? null,
+        validation: undefined,
+        description: '',
+        displayOrder: index,
+      }))
+    : [];
+
+const mapPlanResponse = (raw: any): Plan => {
+  const planMetadata = raw?.plan_metadata ?? {};
+  const steps = raw?.steps ?? [];
+  const inputs = raw?.inputs ?? [];
+
+  const structure: PlanStructure = {
+    fields: mapInputsToFields(inputs),
+    calculations: mapStepsToCalculations(steps),
+    conditions: EMPTY_STRUCTURE.conditions,
+    outputs: mapStepsToOutputs(steps),
+  };
+
+  const usage: PlanUsageStats = {
+    totalExecutions: raw?.runs_count ?? 0,
+    lastExecuted: raw?.last_run_at ?? undefined,
+    averageExecutionTime: raw?.average_execution_time ?? 0,
+    errorRate: raw?.error_rate ?? 0,
+    mostUsedBy: raw?.most_used_by ?? [],
+  };
+
+  const collaborators = Array.isArray(raw?.collaborators) ? raw.collaborators : [];
+  const sharedWith = Array.isArray(raw?.sharedWith) ? raw.sharedWith : [];
+  const tags = Array.isArray(planMetadata?.tags) ? planMetadata.tags : [];
+
+  return {
+    id: raw?.id ?? '',
+    name: raw?.name ?? '',
+    description: planMetadata?.description ?? raw?.notes ?? '',
+    type: normalizeType(planMetadata?.type),
+    status: normalizeStatus(raw?.status),
+    version: raw?.version ?? 1,
+    templateId: planMetadata?.template_id,
+    structure,
+    settings: { ...DEFAULT_PLAN_SETTINGS, ...(raw?.settings ?? {}) },
+    collaborators,
+    sharedWith,
+    tags,
+    category: planMetadata?.category ?? 'general',
+    createdBy: raw?.created_by ?? '',
+    createdAt: raw?.created_at ?? new Date().toISOString(),
+    updatedBy: raw?.locked_by ?? raw?.updated_by ?? raw?.created_by ?? '',
+    updatedAt: raw?.locked_at ?? raw?.updated_at ?? raw?.created_at ?? new Date().toISOString(),
+    validationResults: raw?.validationResults ?? [],
+    versionHistory: raw?.versionHistory ?? [],
+    usageStats: usage,
+  };
+};
+
+const unwrapPlatformResponse = <T>(responseData: any): T => {
+  if (responseData && typeof responseData === 'object' && 'data' in responseData) {
+    return responseData.data as T;
+  }
+  return responseData as T;
+};
+
 class PlanService {
-  private baseUrl = '/api/plans';
+  private baseUrl = '/api/v1/plans';
   private templatesUrl = '/api/plan-templates';
 
   // Plan CRUD Operations
@@ -42,7 +206,18 @@ class PlanService {
       }
 
       const response = await apiClient.get(`${this.baseUrl}?${params}`);
-      return response.data;
+      const payload = unwrapPlatformResponse<{ plans?: any[] }>(response.data);
+      const plans = Array.isArray(payload?.plans)
+        ? payload.plans.map(mapPlanResponse)
+        : [];
+
+      return {
+        plans,
+        total: plans.length,
+        page,
+        pageSize,
+        filters,
+      };
     } catch (error) {
       console.error('Error fetching plans:', error);
       throw new Error('Failed to fetch plans');
@@ -51,8 +226,14 @@ class PlanService {
 
   async getPlan(planId: string): Promise<Plan> {
     try {
-      const response = await apiClient.get(`${this.baseUrl}/${planId}`);
-      return response.data;
+      const response = await apiClient.get(`${this.baseUrl}/${planId}`, {
+        params: { include_steps: true, include_inputs: true },
+      });
+      const payload = unwrapPlatformResponse<{ plan?: any }>(response.data);
+      if (!payload?.plan) {
+        throw new Error('Plan not found');
+      }
+      return mapPlanResponse(payload.plan);
     } catch (error) {
       console.error('Error fetching plan:', error);
       throw new Error('Failed to fetch plan details');

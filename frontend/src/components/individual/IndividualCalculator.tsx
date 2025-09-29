@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BatchParameters } from '../batch/BatchParameterConfig';
 import { calculateBonus } from '../../utils/calculationEngine';
+import payoutService, { PayoutLeg } from '../../services/payoutService';
 
 // Define types locally if not imported from types
 interface EmployeeData {
@@ -82,12 +83,23 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<Array<{type: 'warning' | 'info' | 'error', message: string}>>([]);
+  const [payoutLegs, setPayoutLegs] = useState<PayoutLeg[] | null>(null);
+  const [payoutLoading, setPayoutLoading] = useState<boolean>(false);
   
   // Initialize with existing calculation result if available
   useEffect(() => {
     // Reset calculation result when employee data changes
     setCalculationResult(null);
     setError(null);
+    // Load payout legs for employee if available
+    const empId = employeeData.employee_data?.employee_id;
+    if (empId) {
+      setPayoutLoading(true);
+      payoutService.getEmployeePayoutHistory(empId)
+        .then(legs => setPayoutLegs(legs))
+        .catch(() => setPayoutLegs(null))
+        .finally(() => setPayoutLoading(false));
+    }
     
     if (employeeData.calculation_result) {
       // Use existing calculation result if available
@@ -849,6 +861,43 @@ export const IndividualCalculator: React.FC<IndividualCalculatorProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Payout Splitting Summary */}
+            {payoutLoading ? (
+              <div className="text-sm text-gray-500">Loading vesting schedule...</div>
+            ) : payoutLegs && payoutLegs.length > 0 ? (
+              <div>
+                <h4 className="text-md font-semibold mb-2">Vesting Schedule</h4>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-100 text-left">
+                        <th className="px-3 py-2">Leg</th>
+                        <th className="px-3 py-2 text-right">Amount</th>
+                        <th className="px-3 py-2">Instrument</th>
+                        <th className="px-3 py-2">Grant</th>
+                        <th className="px-3 py-2">Vest</th>
+                        <th className="px-3 py-2">Retention End</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {payoutLegs.map((leg) => (
+                        <tr key={leg.id} className="border-t">
+                          <td className="px-3 py-2">{leg.leg_number}</td>
+                          <td className="px-3 py-2 text-right">£{(leg.amount || 0).toLocaleString()}</td>
+                          <td className="px-3 py-2">{leg.instrument}</td>
+                          <td className="px-3 py-2">{leg.grant_date ? new Date(leg.grant_date).toLocaleDateString() : '-'}</td>
+                          <td className="px-3 py-2">{leg.vest_date ? new Date(leg.vest_date).toLocaleDateString() : '-'}</td>
+                          <td className="px-3 py-2">{leg.retention_end_date ? new Date(leg.retention_end_date).toLocaleDateString() : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">No payout splitting generated yet.</div>
+            )}
           </div>
         ) : (
           <div className="text-center p-8 text-gray-500">

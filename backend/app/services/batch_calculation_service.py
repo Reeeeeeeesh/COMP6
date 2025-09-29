@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session
 import logging
 import asyncio
 
-from ..models import BatchUpload, EmployeeData, BatchCalculationResult, EmployeeCalculationResult, BatchScenario
+from ..models import BatchUpload, EmployeeData, BatchCalculationResult, EmployeeCalculationResult, BatchScenario, PlanRun
 from ..schemas import BatchParameters, BatchCalculationResultCreate, EmployeeCalculationResultCreate
 from ..calculation_engine import CalculationEngine, CalculationInputs, CalculationResult, ValidationError
 from .revenue_banding_service import RevenueBandingService
+from .team_raf_service import get_team_raf_service
+from .calculation_dispatcher import CalculationDispatcher
+from ..rbac.decorators import audit_action, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,85 @@ class BatchCalculationService:
             db: Database session
         """
         self.db = db
-        self.calculation_engine = CalculationEngine()
+        self.calculation_engine = CalculationEngine()  # Keep for backwards compatibility
+        self.calculation_dispatcher = CalculationDispatcher(db)  # New dispatcher for strangler pattern
+    
+    def _execute_calculation(self, calculation_inputs, tenant_id: str = None, user_id: str = None):
+        """
+        Execute calculation using the dispatcher for strangler pattern routing.
+        
+        Args:
+            calculation_inputs: Calculation inputs for the engine
+            tenant_id: Tenant ID for routing decisions
+            user_id: User ID for audit logging
+            
+        Returns:
+            Calculation result
+        """
+        try:
+            # Convert calculation_inputs to the format expected by dispatcher
+            employee_data = [{
+                "base_salary": calculation_inputs.base_salary,
+                "target_bonus_pct": calculation_inputs.target_bonus_pct,
+                "investment_weight": calculation_inputs.investment_weight,
+                "qualitative_weight": calculation_inputs.qualitative_weight,
+                "investment_score_multiplier": calculation_inputs.investment_score_multiplier,
+                "qual_score_multiplier": calculation_inputs.qual_score_multiplier,
+                "raf": calculation_inputs.raf,
+                "is_mrt": calculation_inputs.is_mrt,
+                "mrt_cap_pct": calculation_inputs.mrt_cap_pct
+            }]
+            
+            parameters = {
+                "base_salary_cap": calculation_inputs.base_salary_cap,
+                "total_bonus_pool": getattr(calculation_inputs, 'total_bonus_pool', None),
+                "total_calculated_bonuses": getattr(calculation_inputs, 'total_calculated_bonuses', None),
+                "use_bonus_pool_limit": getattr(calculation_inputs, 'use_bonus_pool_limit', False)
+            }
+            
+            # Execute through dispatcher
+            dispatcher_result = self.calculation_dispatcher.execute_calculation(
+                plan_id=None,  # Could be extracted from calculation_inputs if available
+                tenant_id=tenant_id,
+                employee_data=employee_data,
+                parameters=parameters,
+                user_id=user_id
+            )
+            
+            # If dispatcher execution was successful, extract results
+            if dispatcher_result.success:
+                # Convert dispatcher results back to legacy CalculationResult format
+                results = dispatcher_result.results
+                if isinstance(results, dict) and 'calculations' in results:
+                    # Assume single employee calculation
+                    calc_data = results['calculations'][0] if results['calculations'] else {}
+                    
+                    # Create CalculationResult compatible object
+                    # This is a simplified conversion - adjust based on actual result structure
+                    return CalculationResult(
+                        target_bonus=calc_data.get('target_bonus', 0),
+                        weighted_performance=calc_data.get('weighted_performance', 0),
+                        pre_raf_bonus=calc_data.get('pre_raf_bonus', 0),
+                        initial_bonus=calc_data.get('initial_bonus', 0),
+                        base_salary_cap=calc_data.get('base_salary_cap', 0),
+                        mrt_cap=calc_data.get('mrt_cap', 0),
+                        final_bonus=calc_data.get('final_bonus', 0),
+                        cap_applied=calc_data.get('cap_applied', False),
+                        calculation_steps=calc_data.get('calculation_steps', {})
+                    )
+                else:
+                    # Fallback to legacy engine if result format unexpected
+                    logger.warning("Unexpected dispatcher result format, falling back to legacy engine")
+                    return self.calculation_engine.calculate_final_bonus(calculation_inputs)
+            else:
+                # Dispatcher failed, fallback to legacy engine
+                logger.warning(f"Dispatcher execution failed: {dispatcher_result.error}, falling back to legacy engine")
+                return self.calculation_engine.calculate_final_bonus(calculation_inputs)
+                
+        except Exception as e:
+            # Any error with dispatcher, fallback to legacy engine
+            logger.error(f"Error using calculation dispatcher: {str(e)}, falling back to legacy engine")
+            return self.calculation_engine.calculate_final_bonus(calculation_inputs)
     
     async def calculate_batch(
         self, 
@@ -105,6 +186,46 @@ class BatchCalculationService:
             batch_upload.processed_rows = 0
             self.db.commit()
             logger.info("Updated batch upload status to 'processing'")
+
+            # Generate snapshot hash before execution if possible
+            try:
+                from .snapshot_hash_generator import get_snapshot_hash_generator
+                gen = get_snapshot_hash_generator(self.db, tenant_id=None)
+                # Derive a simple employee_data_structure from first valid row
+                sample = self.db.query(EmployeeData).filter(
+                    EmployeeData.batch_upload_id == batch_upload_id
+                ).first()
+                structure = {}
+                if sample:
+                    # Basic columns we know
+                    structure = {
+                        'employee_id': 'string', 'first_name': 'string', 'last_name': 'string',
+                        'email': 'string', 'department': 'string', 'position': 'string',
+                        'salary': 'number', 'hire_date': 'date'
+                    }
+                    if sample.additional_data:
+                        for k in sample.additional_data.keys():
+                            structure.setdefault(k, 'string')
+                execution_meta = {
+                    'cycle': (category_based_params['defaultParameters'].get('cycle')
+                              if is_category_based else legacy_parameters.dict().get('cycle')),
+                    'upload_ids': []
+                }
+                snapshot_hash = gen.generate_execution_snapshot_hash(
+                    plan_id=None or 'legacy-batch',
+                    employee_data_structure=structure,
+                    precision_mode='balanced',
+                    execution_metadata=execution_meta
+                )
+                logger.info(f"Generated execution snapshot hash: {snapshot_hash}")
+
+                # Attempt to store on related PlanRun if any (best-effort)
+                plan_run = self.db.query(PlanRun).filter(PlanRun.upload_id == batch_upload_id).first()
+                if plan_run:
+                    plan_run.snapshot_hash = snapshot_hash
+                    self.db.commit()
+            except Exception as e:
+                logger.warning(f"Snapshot hash generation skipped: {e}")
             
             # Create scenario if requested
             scenario_id = None
@@ -153,18 +274,68 @@ class BatchCalculationService:
                 total_bonus_pool = category_based_params['defaultParameters'].get('totalBonusPool')
                 use_row_overrides = category_based_params['defaultParameters'].get('useRowValuesWhenPresent', False)
                 use_direct_raf = category_based_params['defaultParameters'].get('useDirectRaf', True)
+                use_team_raf = category_based_params['defaultParameters'].get('useTeamRAF', False)
+                cycle = category_based_params['defaultParameters'].get('cycle')
             else:
                 # For legacy parameters
                 use_bonus_pool_limit = legacy_parameters.dict().get('useBonusPoolLimit', False)
                 total_bonus_pool = legacy_parameters.dict().get('totalBonusPool')
                 use_row_overrides = legacy_parameters.dict().get('useRowValuesWhenPresent', False)
                 use_direct_raf = legacy_parameters.dict().get('useDirectRaf', True)
+                use_team_raf = getattr(legacy_parameters, 'useTeamRAF', False)
+                cycle = getattr(legacy_parameters, 'cycle', None)
             
             # If bonus pool limit is enabled but no pool amount is set, disable it
             if use_bonus_pool_limit and (total_bonus_pool is None or total_bonus_pool <= 0):
                 logger.warning("Bonus pool limit is enabled but no valid pool amount is set. Disabling bonus pool limit.")
                 use_bonus_pool_limit = False
                 total_bonus_pool = None
+                
+            # Get team RAF factors if enabled
+            team_raf_factors = {}
+            team_raf_weight_pct = 0.25  # Default weight percentage for team RAF
+            employee_team_mapping = {}
+            
+            if use_team_raf and cycle:
+                try:
+                    # Get team RAF service
+                    raf_service = get_team_raf_service(self.db)
+                    
+                    # Get all approved RAF factors for the cycle
+                    team_raf_factors = raf_service.get_team_raf_factors(cycle)
+                    
+                    if not team_raf_factors:
+                        logger.warning(f"Team RAF is enabled but no approved RAF factors found for cycle {cycle}")
+                    else:
+                        logger.info(f"Loaded {len(team_raf_factors)} team RAF factors for cycle {cycle}")
+                        
+                        # Get weight percentage from service
+                        team_raf_weight_pct = raf_service.get_team_raf_weight_percentage(cycle)
+                    
+                    # Get employee-team mappings using service
+                    employee_team_mapping = raf_service.get_employee_team_mapping()
+                    
+                    if not employee_team_mapping:
+                        logger.warning("Team RAF is enabled but no employee-team mappings found")
+                    else:
+                        logger.info(f"Loaded {len(employee_team_mapping)} employee-team mappings")
+                        
+                        # Validate that all teams have approved RAF snapshots
+                        is_valid, missing_teams = raf_service.validate_team_raf_coverage(cycle, employee_team_mapping)
+                        
+                        if not is_valid:
+                            missing_teams_str = ", ".join(sorted(missing_teams))
+                            raise ValidationError(
+                                f"Team RAF is enabled but the following teams lack approved RAF snapshots for cycle {cycle}: {missing_teams_str}. "
+                                "All teams with employees must have approved RAF configurations before running batch calculations."
+                            )
+                    
+                except Exception as e:
+                    logger.error(f"Error loading team RAF factors: {str(e)}")
+                    # Re-raise ValidationError to block execution as required
+                    if isinstance(e, ValidationError):
+                        raise
+                    # Continue without team RAF if there's a different error
             
             # Create batch calculation result
             # Use the same safe-serialized parameters for the batch result
@@ -380,8 +551,8 @@ class BatchCalculationService:
                     # Store calculation inputs for potential second pass
                     initial_calculation_inputs.append((employee.id, calculation_inputs))
                     
-                    # Calculate initial bonus (without pool limit)
-                    result = self.calculation_engine.calculate_final_bonus(calculation_inputs)
+                    # Calculate initial bonus (without pool limit) using dispatcher
+                    result = self._execute_calculation(calculation_inputs, tenant_id=getattr(batch_upload, 'tenant_id', None))
                     
                     # Store initial result
                     initial_results.append((employee.id, result))
@@ -447,8 +618,57 @@ class BatchCalculationService:
                             calculation_inputs.total_bonus_pool = total_bonus_pool
                             calculation_inputs.total_calculated_bonuses = pre_scaling_bonus_total
                             
-                            # Recalculate with pool limit
-                            final_result = self.calculation_engine.calculate_final_bonus(calculation_inputs)
+                            # Recalculate with pool limit using dispatcher
+                            final_result = self._execute_calculation(calculation_inputs, tenant_id=getattr(batch_upload, 'tenant_id', None))
+                    
+                    # Apply team RAF factor if enabled
+                    team_raf_factor = 1.0
+                    team_id = None
+                    
+                    if use_team_raf and employee_team_mapping and team_raf_factors:
+                        # Get employee ID from the employee data
+                        employee_id_value = getattr(employee, 'employee_id', None)
+                        if employee_id_value and employee_id_value in employee_team_mapping:
+                            # Get team ID directly from mapping
+                            team_id = employee_team_mapping[employee_id_value]
+                            
+                            # Get RAF factor for this team
+                            team_raf_factor = team_raf_factors.get(team_id, 1.0)
+                    
+                    # Apply team RAF before revenue banding
+                    if use_team_raf and team_raf_factor != 1.0:
+                        # Calculate weighted RAF factor based on weight percentage
+                        weighted_team_raf = 1.0 + ((team_raf_factor - 1.0) * team_raf_weight_pct)
+                        
+                        # Apply weighted team RAF factor
+                        adjusted_bonus = final_result.final_bonus * weighted_team_raf
+                        
+                        # Rebuild calculation result with team RAF applied
+                        final_result = CalculationResult(
+                            target_bonus=final_result.target_bonus,
+                            weighted_performance=final_result.weighted_performance,
+                            pre_raf_bonus=final_result.pre_raf_bonus,
+                            initial_bonus=final_result.initial_bonus,
+                            base_salary_cap=final_result.base_salary_cap,
+                            mrt_cap=final_result.mrt_cap,
+                            final_bonus=adjusted_bonus,
+                            cap_applied=final_result.cap_applied,
+                            calculation_steps={
+                                **final_result.calculation_steps, 
+                                'team_raf': {
+                                    'team_id': team_id,
+                                    'factor': team_raf_factor,
+                                    'weight_pct': team_raf_weight_pct * 100,  # Convert back to percentage for display
+                                    'weighted_factor': weighted_team_raf,
+                                    'pre_team_raf_bonus': final_result.final_bonus,
+                                    'post_team_raf_bonus': adjusted_bonus,
+                                    'approved': True  # Since we only load approved snapshots
+                                }
+                            },
+                            pool_scaling_applied=getattr(final_result, 'pool_scaling_applied', False),
+                            pool_scaling_factor=getattr(final_result, 'pool_scaling_factor', 1.0),
+                            pre_scaling_bonus=getattr(final_result, 'pre_scaling_bonus', 0.0),
+                        )
 
                     # Apply team multiplier (banding) on the final capped (and possibly pool-scaled) bonus
                     if team_multiplier != 1.0:
@@ -464,9 +684,9 @@ class BatchCalculationService:
                             final_bonus=adjusted_bonus,
                             cap_applied=final_result.cap_applied,
                             calculation_steps={**final_result.calculation_steps, 'team_multiplier': team_multiplier},
-                            pool_scaling_applied=final_result.pool_scaling_applied,
-                            pool_scaling_factor=final_result.pool_scaling_factor,
-                            pre_scaling_bonus=final_result.pre_scaling_bonus,
+                            pool_scaling_applied=getattr(final_result, 'pool_scaling_applied', False),
+                            pool_scaling_factor=getattr(final_result, 'pool_scaling_factor', 1.0),
+                            pre_scaling_bonus=getattr(final_result, 'pre_scaling_bonus', 0.0),
                         )
                     
                     # Create employee calculation result
@@ -512,8 +732,22 @@ class BatchCalculationService:
                 'bonus_pool_scaling_factor': pool_scaling_factor,
                 'pre_scaling_bonus_total': pre_scaling_bonus_total
             })
+            
+            # Add revenue banding info if available
             if band_snapshot:
                 parameters_dict.update({'revenue_banding': band_snapshot})
+            
+            # Add team RAF info if available
+            if use_team_raf and team_raf_factors:
+                parameters_dict.update({
+                    'team_raf': {
+                        'enabled': True,
+                        'cycle': cycle,
+                        'teams_with_raf': list(team_raf_factors.keys()),
+                        'weight_pct': team_raf_weight_pct * 100  # Convert to percentage for display
+                    }
+                })
+            
             batch_result.calculation_parameters = parameters_dict
             
             # Update batch upload status
@@ -522,6 +756,34 @@ class BatchCalculationService:
             
             # Final commit
             self.db.commit()
+
+            # Run exception detection
+            try:
+                exception_service = ExceptionRegisterService(self.db)
+                exception_summary = exception_service.bulk_process_batch(batch_result.id, cycle)
+                logger.info(f"Exception summary for batch {batch_result.id}: {exception_summary}")
+            except Exception as e:
+                logger.error(f"Exception detection failed: {e}")
+
+            # Auto payout splitting if an active policy exists for the cycle
+            try:
+                params_dict = batch_result.calculation_parameters or {}
+                population = params_dict.get('population', 'non-MRT')
+                from ..models import PayoutPolicy
+                policy = (
+                    self.db.query(PayoutPolicy)
+                    .filter(PayoutPolicy.cycle == (cycle or ''), PayoutPolicy.population == population, PayoutPolicy.status == 'active')
+                    .order_by(PayoutPolicy.version.desc())
+                    .first()
+                )
+                if policy:
+                    splitter = PayoutSplitterService(self.db)
+                    stats = splitter.split_batch_payouts(user=None, batch_result_id=batch_result.id, policy_id=policy.id)
+                    logger.info(f"Payout splitting completed for batch {batch_result.id}: {stats}")
+                else:
+                    logger.info("No active payout policy; skipping payout split")
+            except Exception as e:
+                logger.error(f"Payout splitting failed: {e}")
             
             logger.info(f"=== BATCH CALCULATION COMPLETED SUCCESSFULLY ===")
             logger.info(f"Total base salary: ${total_base_salary:,.2f}")
@@ -565,3 +827,44 @@ class BatchCalculationService:
         if individual_overrides:
             result.update(individual_overrides)
         return result
+
+    def get_batch_summary_with_exceptions(self, batch_result_id: str) -> Dict[str, Any]:
+        """Return enhanced summary including exception counts and payout status."""
+        result = self.db.query(BatchCalculationResult).filter(BatchCalculationResult.id == batch_result_id).first()
+        if not result:
+            raise ValueError("Batch result not found")
+
+        exception_service = ExceptionRegisterService(self.db)
+        exceptions = exception_service.get_batch_exceptions(batch_result_id)
+
+        # Payout status
+        from ..dal.payout_dal import PayoutLegDAL
+        leg_dal = PayoutLegDAL(self.db)
+        legs = leg_dal.get_by_batch_result(batch_result_id)
+        payout_generated = len(legs) > 0
+
+        return {
+            'id': result.id,
+            'total_employees': result.total_employees,
+            'total_bonus_amount': result.total_bonus_amount,
+            'pool_scaling': {
+                'applied': bool((result.calculation_parameters or {}).get('bonus_pool_scaling_applied')),
+                'factor': (result.calculation_parameters or {}).get('bonus_pool_scaling_factor')
+            },
+            'exceptions': {
+                'count': len(exceptions),
+                'by_severity': self._group_exceptions_by_severity(exceptions)
+            },
+            'payout': {
+                'generated': payout_generated,
+                'legs_count': len(legs)
+            },
+            'team_raf': (result.calculation_parameters or {}).get('team_raf', {})
+        }
+
+    def _group_exceptions_by_severity(self, exceptions: List[Dict[str, Any]]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for e in exceptions:
+            sev = getattr(e, 'severity', 'warning')
+            counts[sev] = counts.get(sev, 0) + 1
+        return counts

@@ -22,6 +22,7 @@ celery_app = Celery(
     include=[
         'app.tasks.calculation_tasks',
         'app.tasks.processing_tasks',
+        'app.tasks.connector_tasks',
     ]
 )
 
@@ -38,6 +39,7 @@ celery_app.conf.update(
     task_routes={
         'app.tasks.calculation_tasks.*': {'queue': 'calculations'},
         'app.tasks.processing_tasks.*': {'queue': 'processing'},
+        'app.tasks.connector_tasks.*': {'queue': 'connectors'},
     },
     
     # Result settings

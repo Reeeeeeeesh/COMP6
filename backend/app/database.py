@@ -48,6 +48,76 @@ def init_db():
     # Import all models to ensure they are registered
     from . import models
     Base.metadata.create_all(bind=engine)
+    # Best-effort lightweight migrations for SQLite dev dbs
+    try:
+        _apply_sqlite_hotfixes()
+    except Exception as _e:
+        # Don't block startup for dev hotfixes
+        logger.warning(f"SQLite hotfixes skipped: {_e}")
+
+
+def _apply_sqlite_hotfixes():
+    """Apply minimal, safe schema hotfixes for SQLite during development.
+
+    This is not a replacement for Alembic migrations; it only patches known
+    missing columns in existing local databases to keep the app usable.
+    """
+    # Only apply to SQLite
+    if not str(engine.url).startswith("sqlite"):
+        return
+
+    with engine.connect() as conn:
+        # Helper: check if a column exists
+        def has_column(table: str, column: str) -> bool:
+            res = conn.execute(text(f"PRAGMA table_info('{table}')"))
+            return any(row[1] == column for row in res.fetchall())
+
+        # 1) employee_calculation_results.payout_generated
+        if not has_column('employee_calculation_results', 'payout_generated'):
+            logger.info("Applying SQLite hotfix: adding employee_calculation_results.payout_generated")
+            conn.execute(text(
+                "ALTER TABLE employee_calculation_results "
+                "ADD COLUMN payout_generated INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+
+        # 2) platform_uploads enhanced storage columns (dev DBs created before feature landed)
+        #    These columns are nullable and safe to add on the fly.
+        try:
+            # If the table exists, PRAGMA will return rows; if not, skip silently
+            res = conn.execute(text("PRAGMA table_info('platform_uploads')"))
+            cols = {row[1] for row in res.fetchall()}
+            if cols:  # table exists
+                if 'bytes_hash' not in cols:
+                    logger.info("Applying SQLite hotfix: adding platform_uploads.bytes_hash")
+                    conn.execute(text(
+                        "ALTER TABLE platform_uploads ADD COLUMN bytes_hash TEXT"
+                    ))
+                if 'storage_path' not in cols:
+                    logger.info("Applying SQLite hotfix: adding platform_uploads.storage_path")
+                    conn.execute(text(
+                        "ALTER TABLE platform_uploads ADD COLUMN storage_path TEXT"
+                    ))
+                if 'lineage_metadata' not in cols:
+                    logger.info("Applying SQLite hotfix: adding platform_uploads.lineage_metadata (JSON)")
+                    conn.execute(text(
+                        "ALTER TABLE platform_uploads ADD COLUMN lineage_metadata JSON"
+                    ))
+                # Some early dev DBs may also be missing upload_metadata or file_size
+                if 'upload_metadata' not in cols:
+                    logger.info("Applying SQLite hotfix: adding platform_uploads.upload_metadata (JSON)")
+                    conn.execute(text(
+                        "ALTER TABLE platform_uploads ADD COLUMN upload_metadata JSON"
+                    ))
+                if 'file_size' not in cols:
+                    logger.info("Applying SQLite hotfix: adding platform_uploads.file_size")
+                    conn.execute(text(
+                        "ALTER TABLE platform_uploads ADD COLUMN file_size INTEGER"
+                    ))
+                conn.commit()
+        except Exception as e:
+            # Do not block startup for dev hotfixes
+            logger.warning(f"SQLite hotfix for platform_uploads skipped: {e}")
 
 # Tenant-aware session context
 _tenant_context = None

@@ -1,14 +1,16 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useState, useEffect } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { 
   Lock, 
   Warning, 
   Home, 
   ContactSupport,
-  ArrowBack 
+  ArrowBack
 } from '@mui/icons-material';
+import { CircularProgress } from '@mui/material';
 import { useUser, UserRole, UserPermission } from '../../contexts/UserContext';
 import { useTenant } from '../../contexts/TenantContext';
+import { apiClient } from '../../services/apiClient';
 
 // Permission check types
 type PermissionCheck = {
@@ -158,6 +160,13 @@ const LoadingPermissions: React.FC = () => (
   </div>
 );
 
+// Backend permission fetching
+interface BackendPermissions {
+  accessible_routes: string[];
+  user_permissions: Record<string, string[]>;
+  role_level: number;
+}
+
 // Main RoleGuard component
 export const RoleGuard: React.FC<RoleGuardProps> = ({
   children,
@@ -172,10 +181,52 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
 }) => {
   const { user, hasRole, hasPermission, isLoading } = useUser();
   const { currentTenant, hasFeature } = useTenant();
+  
+  // Backend permission state
+  const [backendPermissions, setBackendPermissions] = useState<BackendPermissions | null>(null);
+  const [permissionLoading, setPermissionLoading] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  
+  // Fetch permissions from backend when user changes
+  useEffect(() => {
+    if (user && currentTenant && require.type === 'role') {
+      fetchBackendPermissions();
+    }
+  }, [user?.id, currentTenant?.id, require.type]);
+  
+  const fetchBackendPermissions = async () => {
+    if (!user || !currentTenant) return;
+    
+    setPermissionLoading(true);
+    setPermissionError(null);
+    
+    try {
+      // Fetch user permissions from backend
+      const response = await apiClient.get('/api/user/permissions');
+      
+      if (response.data.success) {
+        setBackendPermissions(response.data.data);
+      } else {
+        setPermissionError('Failed to fetch permissions');
+      }
+    } catch (error: any) {
+      console.error('Error fetching backend permissions:', error);
+      setPermissionError(error.response?.data?.detail || 'Permission check failed');
+    } finally {
+      setPermissionLoading(false);
+    }
+  };
 
-  // Show loading if user context is still loading
-  if (isLoading && showLoading) {
-    return <LoadingPermissions />;
+  // Show loading if user context or backend permissions are still loading
+  if ((isLoading || permissionLoading) && showLoading) {
+    return (
+      <div className="flex items-center justify-center p-4">
+        <CircularProgress size={24} />
+        <span className="ml-2 text-gray-600">
+          {isLoading ? 'Loading user...' : 'Checking permissions...'}
+        </span>
+      </div>
+    );
   }
 
   // Strict mode: fail if user is not loaded
@@ -194,19 +245,61 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
     />;
   }
 
-  // Check permissions based on requirement type
+  // Enhanced permission checking with backend integration
   let hasAccess = false;
   let checkContext: any = {};
 
   switch (require.type) {
     case 'role':
       checkContext = { roles: require.roles };
-      hasAccess = require.roles ? require.roles.some(role => hasRole(role)) : false;
+      
+      // Enhanced role checking with backend permissions
+      if (backendPermissions && require.roles) {
+        // Use backend role level comparison for more accurate permission checking
+        const roleHierarchy: Record<string, number> = {
+          'viewer': 10,
+          'analyst': 20,
+          'manager': 40,
+          'hr': 60,
+          'admin': 80,
+          'super_admin': 100
+        };
+
+        const userLevel = backendPermissions.role_level ?? 0;
+        const mappedLevels = require.roles
+          .map(role => roleHierarchy[role] || 0)
+          .filter(level => level > 0);
+
+        if (mappedLevels.length > 0) {
+          const requiredLevel = Math.min(...mappedLevels);
+          hasAccess = userLevel >= requiredLevel;
+        }
+
+        // Fall back to client role check if backend comparison fails (e.g. missing hierarchy mapping)
+        if (!hasAccess) {
+          hasAccess = require.roles.some(role => hasRole(role));
+        }
+      } else {
+        // Fallback to frontend role checking
+        hasAccess = require.roles ? require.roles.some(role => hasRole(role)) : false;
+      }
       break;
       
     case 'permission':
       checkContext = { permissions: require.permissions };
-      hasAccess = require.permissions ? require.permissions.some(permission => hasPermission(permission)) : false;
+      
+      // Enhanced permission checking with backend data
+      if (backendPermissions && require.permissions) {
+        hasAccess = require.permissions.some(permission => {
+          // Check if user has this permission in any group
+          return Object.values(backendPermissions.user_permissions).some(groupPermissions =>
+            groupPermissions.includes(permission)
+          );
+        });
+      } else {
+        // Fallback to frontend permission checking
+        hasAccess = require.permissions ? require.permissions.some(permission => hasPermission(permission)) : false;
+      }
       break;
       
     case 'feature':
@@ -221,6 +314,12 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
       
     default:
       hasAccess = false;
+  }
+
+  // If there was an error fetching backend permissions, show warning but don't block access
+  if (permissionError && require.type === 'role') {
+    console.warn('Backend permission check failed, falling back to frontend permissions:', permissionError);
+    // Continue with frontend-only permission check
   }
 
   // If user has access, render children

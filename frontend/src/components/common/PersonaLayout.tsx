@@ -85,7 +85,7 @@ const sidebarConfigs: Record<UserRole, SidebarItem[]> = {
       path: '/admin/plan-builder',
       icon: () => <span>⚙️</span>,
       section: 'Plan Management',
-      allowedRoles: ['admin'],
+      allowedRoles: ['analyst', 'admin'],
       description: 'Create and manage calculation plans'
     }
   ],

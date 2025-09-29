@@ -33,6 +33,9 @@ import BatchSummary from './BatchSummary';
 import BonusDistributionVisualization from './BonusDistributionVisualization';
 import { formatCurrency, formatPercentage } from '../../utils/formatters';
 import { getBatchCalculationResults, getEmployeeCalculationResults, exportCalculationResults } from '../../services/batchCalculationService';
+import payoutService from '../../services/payoutService';
+import exceptionService from '../../services/exceptionService';
+import apiClient from '../../services/apiClient';
 
 interface EmployeeResult {
   id: string;
@@ -74,6 +77,8 @@ const BatchResultsDisplay: React.FC = () => {
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<BatchResult | null>(null);
   const [employeeResults, setEmployeeResults] = useState<EmployeeResult[]>([]);
+  const [enhancedSummary, setEnhancedSummary] = useState<any | null>(null);
+  const [payoutLoading, setPayoutLoading] = useState<boolean>(false);
   
   // Pagination and filtering state
   const [page, setPage] = useState<number>(0);
@@ -83,6 +88,21 @@ const BatchResultsDisplay: React.FC = () => {
   const [filterDept, setFilterDept] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [departments, setDepartments] = useState<string[]>([]);
+
+  // Trigger payout splitting for the selected batch result and refresh summary
+  const handleTriggerPayout = async () => {
+    if (!selectedResult) return;
+    try {
+      setPayoutLoading(true);
+      await payoutService.triggerPayoutSplitting(selectedResult.id);
+      const res = await apiClient.get(`/api/v1/batch-calculations/results/${selectedResult.id}/enhanced-summary`);
+      setEnhancedSummary((res.data as any).data);
+      setPayoutLoading(false);
+    } catch (e) {
+      setPayoutLoading(false);
+      setError('Failed to trigger payout splitting');
+    }
+  };
   
   // Load batch calculation results
   useEffect(() => {
@@ -185,6 +205,11 @@ const BatchResultsDisplay: React.FC = () => {
     };
     
     fetchEmployeeResults();
+    if (selectedResult) {
+      apiClient.get(`/api/v1/batch-calculations/results/${selectedResult.id}/enhanced-summary`)
+        .then(res => setEnhancedSummary((res.data as any).data))
+        .catch(() => setEnhancedSummary(null));
+    }
   }, [selectedResult, page, rowsPerPage, sortBy, sortOrder, filterDept, searchTerm]);
   
   const handleChangePage = (_event: unknown, newPage: number) => {
@@ -328,6 +353,40 @@ const BatchResultsDisplay: React.FC = () => {
               <BatchSummary batchResultId={selectedResult.id} />
             )}
           </Box>
+
+          {/* Pool scaling banner */}
+          {enhancedSummary?.pool_scaling?.applied && (
+            <Alert severity="info">
+              Pool scaling applied. Factor: {enhancedSummary.pool_scaling.factor}
+            </Alert>
+          )}
+
+          {/* Exceptions Summary */}
+          {enhancedSummary && (
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6">Exceptions Summary</Typography>
+              <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
+                {Object.entries(enhancedSummary.exceptions?.by_severity || {}).map(([sev, count]) => (
+                  <Chip key={sev as string} label={`${sev}: ${count as number}`} />
+                ))}
+              </Box>
+            </Paper>
+          )}
+
+          {/* Payout Status */}
+          {enhancedSummary && (
+            <Paper sx={{ p: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Typography variant="h6">Payout Status</Typography>
+                <Button variant="contained" disabled={payoutLoading} onClick={handleTriggerPayout}>
+                  {payoutLoading ? 'Processing...' : (enhancedSummary.payout?.generated ? 'Re-run Payout Split' : 'Generate Payouts')}
+                </Button>
+              </Box>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                {enhancedSummary.payout?.generated ? `Payout legs generated: ${enhancedSummary.payout.legs_count}` : 'No payout legs generated yet.'}
+              </Typography>
+            </Paper>
+          )}
 
           {/* Bonus Distribution Visualization */}
           <Box>

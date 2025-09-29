@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { apiClient } from './apiClient';
 import { API_BASE_URL } from '../config';
 import { calculateBonus } from '../utils/calculationEngine';
 
@@ -37,7 +37,7 @@ export const triggerBatchCalculation = async (
   scenarioName?: string
 ) => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v1/batch-calculations/uploads/${uploadId}/calculate`,
       parameters,
       {
@@ -66,7 +66,7 @@ export const getBatchUploadStatus = async (uploadId: string) => {
     console.log('Endpoint:', endpoint);
     console.log('Upload ID:', uploadId);
     
-    const response = await axios.get(endpoint);
+    const response = await apiClient.get(endpoint);
     
     console.log('=== BATCH UPLOAD STATUS RESPONSE ===');
     console.log('Response status:', response.status);
@@ -97,7 +97,7 @@ export const getBatchCalculationResults = async (uploadId: string) => {
     console.log('Endpoint:', endpoint);
     console.log('Upload ID:', uploadId);
     
-    const response = await axios.get(endpoint);
+    const response = await apiClient.get(endpoint);
     
     // Log the raw response for debugging
     console.log('=== RAW API RESPONSE ===');
@@ -125,7 +125,7 @@ export const getBatchCalculationResults = async (uploadId: string) => {
 export const getBatchCalculationResult = async (resultId: string) => {
   try {
     const endpoint = `${API_BASE_URL}/api/v1/batch-calculations/results/${resultId}`;
-    const response = await axios.get(endpoint);
+    const response = await apiClient.get(endpoint);
     return response.data.data;
   } catch (error) {
     console.error('Error fetching batch calculation result:', error);
@@ -173,7 +173,7 @@ export const getEmployeeCalculationResults = async (
   
   const endpoint = `${API_BASE_URL}/api/v1/batch-calculations/results/${resultId}/employees?${queryString}`;
   try {
-    const response = await axios.get(endpoint);
+    const response = await apiClient.get(endpoint);
     if (response.data && Array.isArray(response.data.data)) {
       return response.data.data;
     }
@@ -192,7 +192,7 @@ export const getEmployeeCalculationResults = async (
  */
 export const getBatchCalculationSummary = async (resultId: string) => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v1/batch-calculations/results/${resultId}/summary`
     );
     
@@ -217,7 +217,7 @@ export const exportCalculationResults = async (
   includeBreakdown: boolean = false
 ) => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v1/batch-calculations/results/${resultId}/export`,
       {
         format,
@@ -238,7 +238,7 @@ export const exportCalculationResults = async (
  */
 export const getBonusDistributionAnalysis = async (resultId: string) => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v1/batch-calculations/results/${resultId}/distribution`
     );
     return response.data.data;
@@ -260,14 +260,10 @@ export const updateBatchParameters = async (uploadId: string, parameters: any) =
     console.log('Upload ID:', uploadId);
     console.log('Parameters:', parameters);
     
-    const response = await axios.put(
+    const response = await apiClient.put(
       `${API_BASE_URL}/api/v1/batch/uploads/${uploadId}/parameters`,
       parameters,
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
+      {}
     );
     
     console.log('Update batch parameters response:', response.data);

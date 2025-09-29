@@ -1,73 +1,76 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-dev-debug.log
-
-# Dependency directories
+# Dependencies
 node_modules/
+*/node_modules/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+posixvenv/
+backend/.venv/
 backend/venv/
-backend/.pytest_cache/
+backend/posixvenv/
 
-# Python cache files
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+# Build outputs
+dist/
+build/
+*/dist/
+*/build/
 
-# Environment variables
+# Environment files
 .env
-backend/.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Cache and temporary files
+*.pyc
+__pycache__/
+*/__pycache__/
+.cache/
+.pytest_cache/
+*.egg-info/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+*.log.*
+.backend-run.log.err
+uvicorn.pid
+vite.pid
+.backend.pid
+.frontend.pid
 
 # Database files
 *.db
-*.db.backup
+*.sqlite
+*.sqlite3
 
-# Editor directories and files
-.idea
-.vscode
-.cursor/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Screenshots (keeping only the ones we want)
+Screenshot*.png
 
-# OS specific
-.DS_Store
-
-# Task files (commented out to include in repo)
-# tasks.json
-# tasks/
-
-# Test files and debug scripts
-test_*.py
-debug_*.py
-**/tests/
-
-# Build outputs
-frontend/dist/
-frontend/node_modules/
+# Test coverage
+.coverage
+htmlcov/
+.nyc_output
 
 # Temporary files
 *.tmp
-~$*
+*.temp
 
-# Task Master AI - exclude sensitive configs
-.cursor/mcp.json
-.taskmasterconfig
+# Package files
+*.tgz
+*.tar.gz
 
-# Personal development tools
-.roo/
-.roomodes
-.windsurfrules
-.claude/
-
-# Test data and temporary files
-hypothetical_fund_managers*.csv
-*.docx
-
-# Documentation drafts
-PRD*.txt 
+# Lock files (keep package-lock.json but ignore others)
+yarn.lock

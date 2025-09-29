@@ -18,7 +18,7 @@ class TenantDAL(BaseDAL[Tenant]):
     """Data Access Layer for Tenant operations."""
     
     def __init__(self, db: Session):
-        super().__init__(db, Tenant)
+        super().__init__(Tenant, db)
     
     def get_by_name(self, name: str) -> Optional[Tenant]:
         """Get tenant by name."""
@@ -56,7 +56,7 @@ class UserDAL(BaseDAL[User]):
     """Data Access Layer for User operations."""
     
     def __init__(self, db: Session, tenant_id: str = None):
-        super().__init__(db, User)
+        super().__init__(User, db)
         self.tenant_id = tenant_id
     
     def get_by_email(self, email: str, tenant_id: str = None) -> Optional[User]:
@@ -92,7 +92,7 @@ class InputCatalogDAL(BaseDAL[InputCatalog]):
     """Data Access Layer for Input Catalog operations."""
     
     def __init__(self, db: Session, tenant_id: str = None):
-        super().__init__(db, InputCatalog)
+        super().__init__(InputCatalog, db)
         self.tenant_id = tenant_id
     
     def get_by_key(self, key: str, tenant_id: str = None) -> Optional[InputCatalog]:
@@ -128,7 +128,7 @@ class BonusPlanDAL(BaseDAL[BonusPlan]):
     """Data Access Layer for Bonus Plan operations."""
     
     def __init__(self, db: Session, tenant_id: str = None):
-        super().__init__(db, BonusPlan)
+        super().__init__(BonusPlan, db)
         self.tenant_id = tenant_id
     
     def get_by_tenant(self, tenant_id: str = None, status: str = None) -> List[BonusPlan]:
@@ -185,7 +185,7 @@ class PlanRunDAL(BaseDAL[PlanRun]):
     """Data Access Layer for Plan Run operations."""
     
     def __init__(self, db: Session, tenant_id: str = None):
-        super().__init__(db, PlanRun)
+        super().__init__(PlanRun, db)
         self.tenant_id = tenant_id
     
     def get_by_tenant(self, tenant_id: str = None, status: str = None) -> List[PlanRun]:
@@ -228,7 +228,7 @@ class AuditEventDAL(BaseDAL[AuditEvent]):
     """Data Access Layer for Audit Event operations."""
     
     def __init__(self, db: Session, tenant_id: str = None):
-        super().__init__(db, AuditEvent)
+        super().__init__(AuditEvent, db)
         self.tenant_id = tenant_id
     
     def log_event(self, action: str, entity: str, entity_id: str, 

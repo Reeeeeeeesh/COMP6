@@ -6,11 +6,12 @@ to ensure calculation reproducibility for financial compliance and audit purpose
 """
 import hashlib
 import json
+import os
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from ..models import BonusPlan, PlanStep, PlanInput, InputCatalog
+from ..models import BonusPlan, PlanStep, PlanInput, InputCatalog, RAFSnapshot, ParameterPreset, PayoutPolicy, FXRate, PlatformUpload
 from ..dal.platform_dal import BonusPlanDAL, InputCatalogDAL
 
 
@@ -34,11 +35,11 @@ class SnapshotHashGenerator:
         self.plan_dal = BonusPlanDAL(db, tenant_id)
         self.input_dal = InputCatalogDAL(db, tenant_id)
     
-    def generate_execution_snapshot_hash(self, 
-                                       plan_id: str, 
-                                       employee_data_structure: Dict[str, str],
-                                       precision_mode: str = 'balanced',
-                                       execution_metadata: Optional[Dict[str, Any]] = None) -> str:
+    def generate_execution_snapshot_hash(self,
+                                         plan_id: str,
+                                         employee_data_structure: Dict[str, str],
+                                         precision_mode: str = 'balanced',
+                                         execution_metadata: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate comprehensive snapshot hash for plan execution.
         
@@ -58,10 +59,14 @@ class SnapshotHashGenerator:
                 raise ValueError(f"Plan {plan_id} not found")
             
             # 2. Build comprehensive snapshot data
+            cycle = None
+            if execution_metadata:
+                cycle = execution_metadata.get('cycle') or execution_metadata.get('fiscal_year')
+
             snapshot_data = {
                 # Platform version - critical for reproducibility across updates
-                'platform_version': '1.0.0',  # TODO: Get from actual version
-                'calculation_engine_version': 'vectorized_polars_1.0',
+                'platform_version': os.getenv('PLATFORM_VERSION', '1.0.0'),
+                'calculation_engine_version': os.getenv('ENGINE_VERSION', os.getenv('GIT_SHA', 'vectorized_polars_1.0')),
                 
                 # Plan configuration
                 'plan': {
@@ -93,7 +98,17 @@ class SnapshotHashGenerator:
                 },
                 
                 # Timestamp of hash generation for audit trail
-                'snapshot_generated_at': datetime.utcnow().isoformat()
+                'snapshot_generated_at': datetime.utcnow().isoformat(),
+
+                # Extended reproducibility components
+                'raf_snapshots': self._get_raf_snapshots_for_cycle(cycle) if cycle else [],
+                'parameter_presets': self._get_parameter_presets_snapshot(),
+                'payout_policies': self._get_payout_policies_snapshot(cycle) if cycle else [],
+                'fx_rates': self._get_fx_rates_snapshot(cycle) if cycle else [],
+                'input_files': self._get_input_files_snapshot(execution_metadata),
+                'malus_clawback_policies': execution_metadata.get('malus_clawback_policies', []) if execution_metadata else []
+                ,
+                'metrics_config': execution_metadata.get('metrics_config', {}) if execution_metadata else {}
             }
             
             # 3. Generate deterministic hash
@@ -115,7 +130,8 @@ class SnapshotHashGenerator:
                 'expression': step.expr,
                 'condition_expression': step.condition_expr,
                 'outputs': step.outputs or [],
-                'notes': step.notes
+                'notes': step.notes,
+                'precision': (step.notes or {}).get('precision') if isinstance(step.notes, dict) else None
             }
             for step in steps
         ]
@@ -177,6 +193,105 @@ class SnapshotHashGenerator:
         
         # Generate SHA-256 hash
         return hashlib.sha256(json_string.encode('utf-8')).hexdigest()
+
+    # ---------- Extended snapshots ----------
+
+    def _get_raf_snapshots_for_cycle(self, cycle: Optional[str]) -> List[Dict[str, Any]]:
+        if not cycle:
+            return []
+        snaps = (
+            self.db.query(RAFSnapshot)
+            .filter(RAFSnapshot.cycle == str(cycle))
+            .order_by(RAFSnapshot.created_at.asc())
+            .all()
+        )
+        return [
+            {
+                'team_id': s.team_id,
+                'cycle': s.cycle,
+                'computed_factor': s.computed_factor,
+                'inputs_hash': s.inputs_hash,
+                'cap_applied': s.cap_applied,
+                'floor_applied': s.floor_applied,
+                'approved_at': s.approved_at.isoformat() if s.approved_at else None,
+                'approver_ids': s.approver_ids or []
+            }
+            for s in snaps
+        ]
+
+    def _get_parameter_presets_snapshot(self) -> List[Dict[str, Any]]:
+        presets = self.db.query(ParameterPreset).order_by(ParameterPreset.created_at.asc()).all()
+        return [
+            {
+                'id': p.id,
+                'name': p.name,
+                'parameters': p.parameters,
+                'is_default': p.is_default,
+                'created_at': p.created_at.isoformat() if p.created_at else None,
+                'updated_at': p.updated_at.isoformat() if p.updated_at else None
+            }
+            for p in presets
+        ]
+
+    def _get_payout_policies_snapshot(self, cycle: Optional[str]) -> List[Dict[str, Any]]:
+        if not cycle:
+            return []
+        policies = (
+            self.db.query(PayoutPolicy)
+            .filter(PayoutPolicy.cycle == str(cycle))
+            .order_by(PayoutPolicy.version.asc())
+            .all()
+        )
+        return [
+            {
+                'id': pol.id,
+                'cycle': pol.cycle,
+                'population': pol.population,
+                'version': pol.version,
+                'status': pol.status,
+                'rules_json': pol.rules_json,
+                'approved_at': pol.approved_at.isoformat() if pol.approved_at else None
+            }
+            for pol in policies
+        ]
+
+    def _get_fx_rates_snapshot(self, cycle: Optional[str]) -> List[Dict[str, Any]]:
+        try:
+            if not cycle:
+                return []
+            year = int(str(cycle)[:4])
+        except Exception:
+            return []
+        rates = self.db.query(FXRate).filter(FXRate.fiscal_year == year).all()
+        return [
+            {
+                'from': r.from_currency,
+                'to': r.to_currency,
+                'fiscal_year': r.fiscal_year,
+                'rate': r.rate,
+                'source': r.source,
+                'effective_date': r.effective_date.isoformat() if r.effective_date else None
+            }
+            for r in rates
+        ]
+
+    def _get_input_files_snapshot(self, execution_metadata: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # If execution metadata provides upload IDs, include their hashes
+        if not execution_metadata:
+            return []
+        upload_ids = execution_metadata.get('upload_ids') or []
+        if not upload_ids:
+            return []
+        uploads = self.db.query(PlatformUpload).filter(PlatformUpload.id.in_(upload_ids)).all()
+        return [
+            {
+                'upload_id': u.id,
+                'filename': u.filename,
+                'bytes_hash': u.bytes_hash,
+                'file_size': u.file_size
+            }
+            for u in uploads
+        ]
     
     def verify_snapshot_reproducibility(self, 
                                       plan_id: str,

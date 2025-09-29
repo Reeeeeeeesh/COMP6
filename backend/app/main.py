@@ -1,17 +1,46 @@
 import logging
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from .database import get_db, init_db, engine, Base
+from .database import get_db, init_db, engine, Base, SessionLocal
 from .models import Session as SessionModel
 from .schemas import ApiResponse, SessionResponse
 from .services.session_service import SessionService
 from .services.data_retention_service import DataRetentionService
-from .routers import batch, batch_parameters, parameter_presets, batch_calculations, scenarios, dashboard, revenue_banding, health, platform, input_catalog, plan_management, column_mapping, bonus_statements, executive_reporting
+from .routers import (
+    batch,
+    batch_parameters,
+    parameter_presets,
+    batch_calculations,
+    scenarios,
+    dashboard,
+    revenue_banding,
+    health,
+    platform,
+    input_catalog,
+    plan_management,
+    column_mapping,
+    bonus_statements,
+    executive_reporting,
+    team_raf,
+    payout,
+    exceptions,
+    payroll,
+    files,
+    plans_facade,
+)
+from .routers import malus_clawback
+from .routers import connectors, pilot
+
+# Import new foundation components
+from .logging_config import setup_logging
+from .feature_flags import get_feature_flags
+from .storage.file_store import LocalFileStore
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +88,37 @@ async def lifespan(app: FastAPI):
     """Manage FastAPI application lifespan"""
     # Startup
     logger.info("Starting FastAPI application")
+    
+    # Initialize foundation components first
+    try:
+        # Setup PII-safe logging
+        setup_logging(
+            log_level=os.getenv("LOG_LEVEL", "INFO"),
+            log_file=os.getenv("LOG_FILE"),
+            db_session_factory=lambda: SessionLocal()
+        )
+        logger.info("PII-safe logging configured")
+        
+        # Initialize feature flags
+        feature_flags = get_feature_flags()
+        logger.info(f"Feature flags initialized: {feature_flags.get_flag_status()}")
+        
+        # Initialize file storage
+        storage_dir = os.getenv("STORAGE_DIR", "storage")
+        file_store = LocalFileStore(base_path=storage_dir)
+        
+        # Verify storage directory is writable
+        storage_stats = file_store.get_storage_stats()
+        logger.info(f"File storage initialized: {storage_stats}")
+        
+        # Store file store instance for dependency injection
+        app.state.file_store = file_store
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize foundation components: {str(e)}")
+        # Continue startup but log the error
+    
+    # Initialize database
     init_db()
     
     # Initialize platform infrastructure
@@ -168,6 +228,7 @@ app.include_router(input_catalog.router, prefix="/api/v1")
 
 # Include plan management router
 app.include_router(plan_management.router, prefix="/api/v1")
+app.include_router(plans_facade.router, prefix="/api/v1")
 
 # Include column mapping router
 app.include_router(column_mapping.router, prefix="/api/v1")
@@ -177,6 +238,20 @@ app.include_router(bonus_statements.router, prefix="/api/v1")
 
 # Include executive reporting router (Task 21)
 app.include_router(executive_reporting.router)
+
+# Include team RAF router
+app.include_router(team_raf.router)  # Router already has prefix='/api/v1/teams'
+
+# Include payout, exceptions, and payroll routers
+app.include_router(payout.router)
+app.include_router(exceptions.router)
+app.include_router(payroll.router)
+app.include_router(malus_clawback.router, prefix="/api/v1")
+app.include_router(connectors.router, prefix="/api/v1")
+app.include_router(pilot.router, prefix="/api/v1")
+
+# Include files router for serving generated files
+app.include_router(files.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
@@ -297,6 +372,84 @@ async def cleanup_expired_data(retention_hours: int = 72, db: Session = Depends(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cleanup expired data"
+        )
+
+# Foundation Components Health Check
+@app.get("/api/health/foundation", response_model=ApiResponse)
+async def foundation_health_check():
+    """Check health of foundation components (feature flags, file storage, logging)"""
+    try:
+        health_status = {
+            "healthy": True,
+            "components": {},
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+        # Check feature flags
+        try:
+            feature_flags = get_feature_flags()
+            flag_status = feature_flags.get_flag_status()
+            health_status["components"]["feature_flags"] = {
+                "healthy": True,
+                "status": flag_status
+            }
+        except Exception as e:
+            health_status["components"]["feature_flags"] = {
+                "healthy": False,
+                "error": str(e)
+            }
+            health_status["healthy"] = False
+        
+        # Check file storage
+        try:
+            file_store = getattr(app.state, 'file_store', None)
+            if file_store:
+                storage_stats = file_store.get_storage_stats()
+                health_status["components"]["file_storage"] = {
+                    "healthy": True,
+                    "stats": storage_stats
+                }
+            else:
+                health_status["components"]["file_storage"] = {
+                    "healthy": False,
+                    "error": "File store not initialized"
+                }
+                health_status["healthy"] = False
+        except Exception as e:
+            health_status["components"]["file_storage"] = {
+                "healthy": False,
+                "error": str(e)
+            }
+            health_status["healthy"] = False
+        
+        # Check logging system
+        try:
+            # Simple check - verify we can create a log entry
+            test_logger = logging.getLogger("health_check")
+            test_logger.info("Foundation health check performed")
+            health_status["components"]["logging"] = {
+                "healthy": True,
+                "level": logging.getLogger().level,
+                "handlers": len(logging.getLogger().handlers)
+            }
+        except Exception as e:
+            health_status["components"]["logging"] = {
+                "healthy": False,
+                "error": str(e)
+            }
+            health_status["healthy"] = False
+        
+        return ApiResponse(
+            success=health_status["healthy"],
+            message="Foundation health check completed",
+            data=health_status
+        )
+        
+    except Exception as e:
+        logger.error(f"Foundation health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Foundation health check failed: {str(e)}"
         )
 
 if __name__ == "__main__":

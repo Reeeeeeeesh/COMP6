@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { apiClient } from './apiClient';
 import { API_BASE_URL } from '../config';
 import {
   Scenario,
@@ -89,14 +89,10 @@ export interface ScenarioListResponse {
  */
 export const getAvailableBatchSources = async (sessionId: string): Promise<BatchSource[]> => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v1/scenarios/sources/batches`,
       {
         params: { session_id: sessionId },
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -109,9 +105,6 @@ export const getAvailableBatchSources = async (sessionId: string): Promise<Batch
     }
   } catch (error) {
     console.error('Error fetching available batch sources:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to fetch batch sources: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -123,14 +116,10 @@ export const getAvailableBatchSources = async (sessionId: string): Promise<Batch
  */
 export const createScenario = async (scenarioData: ScenarioCreateData): Promise<ScenarioData> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v1/scenarios`,
       scenarioData,
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -143,9 +132,6 @@ export const createScenario = async (scenarioData: ScenarioCreateData): Promise<
     }
   } catch (error) {
     console.error('Error creating scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to create scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -157,14 +143,10 @@ export const createScenario = async (scenarioData: ScenarioCreateData): Promise<
  */
 export const createScenarioFromBatch = async (createRequest: ScenarioCreateRequest): Promise<ScenarioData> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v1/scenarios/from-batch`,
       createRequest,
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -177,9 +159,6 @@ export const createScenarioFromBatch = async (createRequest: ScenarioCreateReque
     }
   } catch (error) {
     console.error('Error creating scenario from batch:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to create scenario from batch: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -204,14 +183,10 @@ export const listScenarios = async (
     if (hasCalculations !== undefined) params.has_calculations = hasCalculations;
     if (limit) params.limit = limit;
 
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v1/scenarios`,
       {
         params,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -224,9 +199,6 @@ export const listScenarios = async (
     }
   } catch (error) {
     console.error('Error listing scenarios:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to list scenarios: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -242,14 +214,10 @@ export const getScenario = async (scenarioId: string, includeAuditLog?: boolean)
     const params: Record<string, any> = {};
     if (includeAuditLog) params.include_audit_log = true;
 
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v1/scenarios/${scenarioId}`,
       {
         params,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -262,9 +230,6 @@ export const getScenario = async (scenarioId: string, includeAuditLog?: boolean)
     }
   } catch (error) {
     console.error('Error getting scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -277,14 +242,10 @@ export const getScenario = async (scenarioId: string, includeAuditLog?: boolean)
  */
 export const updateScenario = async (scenarioId: string, updateData: ScenarioUpdateData): Promise<ScenarioData> => {
   try {
-    const response = await axios.put(
+    const response = await apiClient.put(
       `${API_BASE_URL}/api/v1/scenarios/${scenarioId}`,
       updateData,
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -297,9 +258,6 @@ export const updateScenario = async (scenarioId: string, updateData: ScenarioUpd
     }
   } catch (error) {
     console.error('Error updating scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to update scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -311,14 +269,9 @@ export const updateScenario = async (scenarioId: string, updateData: ScenarioUpd
  */
 export const deleteScenario = async (scenarioId: string): Promise<{ deleted_scenario_id: string }> => {
   try {
-    const response = await axios.delete(
+    const response = await apiClient.delete(
       `${API_BASE_URL}/api/v1/scenarios/${scenarioId}`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     console.log('Delete scenario response:', response.data);
@@ -330,9 +283,6 @@ export const deleteScenario = async (scenarioId: string): Promise<{ deleted_scen
     }
   } catch (error) {
     console.error('Error deleting scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to delete scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -353,15 +303,10 @@ export const duplicateScenario = async (
     const requestData: { new_name: string; new_description?: string } = { new_name: newName };
     if (newDescription) requestData.new_description = newDescription;
 
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v1/scenarios/${scenarioId}/duplicate`,
       requestData,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     console.log('Duplicate scenario response:', response.data);
@@ -373,9 +318,6 @@ export const duplicateScenario = async (
     }
   } catch (error) {
     console.error('Error duplicating scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to duplicate scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -394,14 +336,10 @@ export const getScenarioAuditHistory = async (
     const params: Record<string, any> = {};
     if (limit) params.limit = limit;
 
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v1/scenarios/${scenarioId}/audit-history`,
       {
         params,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -414,9 +352,6 @@ export const getScenarioAuditHistory = async (
     }
   } catch (error) {
     console.error('Error getting scenario audit history:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get scenario audit history: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -432,15 +367,10 @@ export const getScenarioAuditHistory = async (
  */
 export const createComprehensiveScenario = async (request: CreateScenarioRequest): Promise<Scenario> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios`,
       request,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -450,9 +380,6 @@ export const createComprehensiveScenario = async (request: CreateScenarioRequest
     }
   } catch (error) {
     console.error('Error creating comprehensive scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to create scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -468,15 +395,10 @@ export const updateComprehensiveScenario = async (
   request: UpdateScenarioRequest
 ): Promise<Scenario> => {
   try {
-    const response = await axios.put(
+    const response = await apiClient.put(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}`,
       request,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -486,9 +408,6 @@ export const updateComprehensiveScenario = async (
     }
   } catch (error) {
     console.error('Error updating comprehensive scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to update scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -500,14 +419,9 @@ export const updateComprehensiveScenario = async (
  */
 export const getComprehensiveScenario = async (scenarioId: string): Promise<Scenario> => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -517,9 +431,6 @@ export const getComprehensiveScenario = async (scenarioId: string): Promise<Scen
     }
   } catch (error) {
     console.error('Error getting comprehensive scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -549,14 +460,10 @@ export const listComprehensiveScenarios = async (
     if (createdBy) params.created_by = createdBy;
     if (tags) params.tags = tags;
 
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v2/scenarios`,
       {
         params,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -567,9 +474,6 @@ export const listComprehensiveScenarios = async (
     }
   } catch (error) {
     console.error('Error listing comprehensive scenarios:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to list scenarios: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -581,18 +485,13 @@ export const listComprehensiveScenarios = async (
  */
 export const calculateScenario = async (request: CalculateScenarioRequest): Promise<ScenarioResults> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${request.scenarioId}/calculate`,
       {
         mode: request.mode,
         options: request.options
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -602,9 +501,6 @@ export const calculateScenario = async (request: CalculateScenarioRequest): Prom
     }
   } catch (error) {
     console.error('Error calculating scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to calculate scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -620,14 +516,9 @@ export const getCalculationStatus = async (scenarioId: string): Promise<{
   message?: string;
 }> => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/calculation-status`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -637,9 +528,6 @@ export const getCalculationStatus = async (scenarioId: string): Promise<{
     }
   } catch (error) {
     console.error('Error getting calculation status:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get calculation status: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -659,19 +547,14 @@ export const cloneScenario = async (
   parameterOverrides?: Record<string, any>
 ): Promise<Scenario> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/clone`,
       {
         name,
         description,
         parameter_overrides: parameterOverrides
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -681,9 +564,6 @@ export const cloneScenario = async (
     }
   } catch (error) {
     console.error('Error cloning scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to clone scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -699,15 +579,10 @@ export const cloneScenario = async (
  */
 export const createScenarioComparison = async (request: CreateComparisonRequest): Promise<ScenarioComparison> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenario-comparisons`,
       request,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -717,9 +592,6 @@ export const createScenarioComparison = async (request: CreateComparisonRequest)
     }
   } catch (error) {
     console.error('Error creating scenario comparison:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to create comparison: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -731,15 +603,10 @@ export const createScenarioComparison = async (request: CreateComparisonRequest)
  */
 export const executeScenarioComparison = async (comparisonId: string): Promise<ComparisonResults> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenario-comparisons/${comparisonId}/execute`,
       {},
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -749,9 +616,6 @@ export const executeScenarioComparison = async (comparisonId: string): Promise<C
     }
   } catch (error) {
     console.error('Error executing scenario comparison:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to execute comparison: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -763,14 +627,9 @@ export const executeScenarioComparison = async (comparisonId: string): Promise<C
  */
 export const getComparisonResults = async (comparisonId: string): Promise<ComparisonResults> => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v2/scenario-comparisons/${comparisonId}/results`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -780,9 +639,6 @@ export const getComparisonResults = async (comparisonId: string): Promise<Compar
     }
   } catch (error) {
     console.error('Error getting comparison results:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get comparison results: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -804,18 +660,13 @@ export const runSensitivityAnalysis = async (
   valueRange: { min: number; max: number; steps: number }
 ): Promise<SensitivityAnalysis> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/sensitivity-analysis`,
       {
         parameter_id: parameterId,
         value_range: valueRange
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -825,9 +676,6 @@ export const runSensitivityAnalysis = async (
     }
   } catch (error) {
     console.error('Error running sensitivity analysis:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to run sensitivity analysis: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -839,14 +687,9 @@ export const runSensitivityAnalysis = async (
  */
 export const getSensitivityAnalysis = async (analysisId: string): Promise<SensitivityAnalysis> => {
   try {
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v2/sensitivity-analysis/${analysisId}`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -856,9 +699,6 @@ export const getSensitivityAnalysis = async (analysisId: string): Promise<Sensit
     }
   } catch (error) {
     console.error('Error getting sensitivity analysis:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get sensitivity analysis: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -882,14 +722,10 @@ export const getScenarioAnalytics = async (
     if (planId) params.plan_id = planId;
     if (dateRange) params.date_range = dateRange;
 
-    const response = await axios.get(
+    const response = await apiClient.get(
       `${API_BASE_URL}/api/v2/scenario-analytics`,
       {
         params,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
       }
     );
     
@@ -900,9 +736,6 @@ export const getScenarioAnalytics = async (
     }
   } catch (error) {
     console.error('Error getting scenario analytics:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get scenario analytics: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -920,18 +753,13 @@ export const exportScenario = async (
   includeDetails: boolean = true
 ): Promise<{ downloadUrl: string; filename: string }> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/export`,
       {
         format,
         include_details: includeDetails
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -941,9 +769,6 @@ export const exportScenario = async (
     }
   } catch (error) {
     console.error('Error exporting scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to export scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -961,18 +786,13 @@ export const shareScenario = async (
   isPublic: boolean = false
 ): Promise<{ shared_with: string[]; is_public: boolean; share_url?: string }> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/share`,
       {
         share_with: shareWith,
         is_public: isPublic
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -982,9 +802,6 @@ export const shareScenario = async (
     }
   } catch (error) {
     console.error('Error sharing scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to share scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -1004,15 +821,10 @@ export const validateScenario = async (scenarioId: string): Promise<{
   warnings: Array<{ field: string; message: string; suggestion?: string }>;
 }> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/validate`,
       {},
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -1022,9 +834,6 @@ export const validateScenario = async (scenarioId: string): Promise<{
     }
   } catch (error) {
     console.error('Error validating scenario:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to validate scenario: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
 };
@@ -1049,17 +858,12 @@ export const getOptimizationRecommendations = async (
   estimatedImprovement: number;
 }> => {
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       `${API_BASE_URL}/api/v2/scenarios/${scenarioId}/optimize`,
       {
         optimization_goal: optimizationGoal
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
+      {}
     );
     
     if (response.data.success) {
@@ -1069,9 +873,6 @@ export const getOptimizationRecommendations = async (
     }
   } catch (error) {
     console.error('Error getting optimization recommendations:', error);
-    if (axios.isAxiosError(error)) {
-      throw new Error(`Failed to get optimization recommendations: ${error.response?.status} ${error.response?.statusText}`);
-    }
     throw error;
   }
-}; 
+};

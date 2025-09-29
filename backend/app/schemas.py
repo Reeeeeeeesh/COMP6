@@ -1,6 +1,75 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from enum import Enum
+
+# Export all schemas for easier imports
+__all__ = [
+    # Base schemas
+    "SessionBase", "SessionCreate", "SessionResponse",
+    
+    # Batch schemas
+    "BatchParameters", "CategoryParameters", "CategoryBasedBatchParameters",
+    "ParameterPresetBase", "ParameterPresetCreate", "ParameterPresetUpdate", "ParameterPreset",
+    "BatchUploadBase", "BatchUploadCreate", "BatchUploadUpdate", "BatchUploadResponse",
+    
+    # Employee schemas
+    "EmployeeDataBase", "EmployeeDataCreate", "EmployeeDataResponse",
+    
+    # Scenario schemas  
+    "BatchScenarioBase", "BatchScenarioCreate", "BatchScenarioUpdate", "BatchScenarioResponse",
+    
+    # Calculation schemas
+    "EmployeeCalculationResultBase", "EmployeeCalculationResultCreate", "EmployeeCalculationResultResponse",
+    "BatchCalculationResultBase", "BatchCalculationResultCreate", "BatchCalculationResultResponse",
+    
+    # Template schemas
+    "ImportTemplateBase", "ImportTemplateCreate", "ImportTemplateUpdate", "ImportTemplateResponse",
+    
+    # Audit schemas
+    "ScenarioAuditLogBase", "ScenarioAuditLogCreate", "ScenarioAuditLogResponse",
+    
+    # Revenue Banding schemas
+    "TeamBase", "TeamCreate", "TeamUpdate", "TeamResponse",
+    "TeamRevenueHistoryBase", "TeamRevenueHistoryCreate", "TeamRevenueHistoryResponse",
+    "RevenueBandSettings", "RevenueBandConfigBase", "RevenueBandConfigCreate", 
+    "RevenueBandConfigUpdate", "RevenueBandConfigResponse",
+    "BandPreviewComponents", "BandPreviewResponse",
+    
+    # Platform schemas
+    "TenantBase", "TenantCreate", "TenantUpdate", "TenantResponse",
+    "UserBase", "UserCreate", "UserUpdate", "UserResponse",
+    "InputCatalogBase", "InputCatalogCreate", "InputCatalogUpdate", "InputCatalogResponse",
+    "BonusPlanBase", "BonusPlanCreate", "BonusPlanUpdate", "BonusPlanResponse",
+    "PlanStepBase", "PlanStepCreate", "PlanStepUpdate", "PlanStepResponse",
+    "PlanInputBase", "PlanInputCreate", "PlanInputResponse",
+    "PlanRunBase", "PlanRunCreate", "PlanRunUpdate", "PlanRunResponse",
+    "AuditEventBase", "AuditEventCreate", "AuditEventResponse",
+    
+    # Bonus Statement schemas
+    "BonusStatementRequest", "BonusStatementData", "BonusStatementResponse",
+    
+    # RAF schemas
+    "RAFMethod", "RAFConfigBase", "RAFConfigCreate", "RAFConfigUpdate", "RAFConfigResponse",
+    "RAFPreviewRequest", "RAFPreviewResponse", "RAFApprovalRequest",
+    "TeamRevenueHistoryRow", "TeamRevenueHistoryImport", 
+    "TeamRevenueDataBase", "TeamRevenueDataCreate", "TeamRevenueDataResponse",
+    "OrgMembershipBase", "OrgMembershipCreate", "OrgMembershipResponse",
+    "RAFStatusResponse", "RAFHistoryEvent", "RAFHistoryResponse",
+    
+    # Executive Reporting schemas
+    "PoolVsTargetAnalysis", "TrendDataPoint", "ExecutiveSummary", 
+    "ReportingFilters", "DynamicReportRequest",
+    
+    # API Response schemas
+    "ApiResponse", "PlatformApiResponse",
+
+    # Payout + Exceptions + Payroll
+    "PayoutTranche", "PayoutPolicyBase", "PayoutPolicyCreate", "PayoutPolicyResponse",
+    "PayoutLegBase", "PayoutLegResponse", "PayoutSummary",
+    "ExceptionSeverity", "ExceptionStatus", "ExceptionEventBase", "ExceptionEventCreate", "ExceptionEventResponse",
+    "PayrollExportRequest", "PayrollExportResponse"
+]
 
 # Base schemas
 class SessionBase(BaseModel):
@@ -693,6 +762,221 @@ class BonusStatementResponse(BaseModel):
 
 
 # ================================
+# Team RAF Schemas
+# ================================
+
+class RAFMethod(str, Enum):
+    """Enumeration of available RAF calculation methods."""
+    CAGR_3Y = "CAGR_3Y"
+    AVG_YOY_3Y = "AVG_YOY_3Y"
+
+
+class RAFConfigBase(BaseModel):
+    """Base schema for RAF configuration."""
+    team_id: str
+    cycle: str  # Can be string or int representation
+    method: RAFMethod
+    include_perf_fees: bool = False
+    const_currency: bool = False
+    cap_factor: Optional[float] = Field(None, ge=0, description="Cap factor must be >= 0")
+    floor_factor: Optional[float] = Field(None, gt=0, description="Floor factor must be > 0")
+    weight_pct: float = Field(100.0, gt=0, le=100, description="Weight percentage must be between 0 and 100")
+
+    @field_validator('cap_factor')
+    @classmethod
+    def validate_cap_factor(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Cap factor must be >= 0")
+        return v
+    
+    @field_validator('floor_factor')
+    @classmethod
+    def validate_floor_factor(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Floor factor must be > 0")
+        return v
+
+
+class RAFConfigCreate(RAFConfigBase):
+    """Schema for creating a new RAF configuration."""
+    pass
+
+
+class RAFConfigUpdate(BaseModel):
+    """Schema for updating an existing RAF configuration."""
+    method: Optional[RAFMethod] = None
+    include_perf_fees: Optional[bool] = None
+    const_currency: Optional[bool] = None
+    cap_factor: Optional[float] = Field(None, ge=0, description="Cap factor must be >= 0")
+    floor_factor: Optional[float] = Field(None, gt=0, description="Floor factor must be > 0")
+    weight_pct: Optional[float] = Field(None, gt=0, le=100, description="Weight percentage must be between 0 and 100")
+
+
+class RAFConfigResponse(RAFConfigBase):
+    """Schema for RAF configuration response."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    status: str
+    created_by: str
+    created_at: datetime
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    rationale: Optional[str] = None
+
+
+class RAFPreviewRequest(BaseModel):
+    """Schema for requesting a RAF calculation preview."""
+    config_id: str
+
+
+class RAFPreviewResponse(BaseModel):
+    """Schema for RAF calculation preview response."""
+    config_id: str
+    team_id: str
+    cycle: str
+    method: RAFMethod
+    computed_factor: float
+    original_factor: float
+    cap_applied: bool
+    floor_applied: bool
+    explanation_tape: Dict[str, Any]  # Changed from List to Dict as per requirements
+    weight_pct: float
+    status: str
+    inputs_hash: Optional[str] = None
+
+
+class RAFApprovalRequest(BaseModel):
+    """Schema for RAF approval request."""
+    rationale: str = Field(..., min_length=10, max_length=1000, description="Rationale for RAF approval")
+    approver_id: Optional[str] = Field(None, description="Approver ID if not implied from context")
+
+
+class TeamRevenueHistoryRow(BaseModel):
+    """Schema for individual team revenue history row."""
+    team_code: str
+    fiscal_year: int
+    reported_revenue: float
+    organic_revenue: Optional[float] = None
+    currency: str
+    perf_fee_component: Optional[float] = None
+    notes: Optional[str] = None
+
+    @field_validator('fiscal_year')
+    @classmethod
+    def validate_fiscal_year(cls, v):
+        if v < 1900 or v > 2100:
+            raise ValueError("Fiscal year must be between 1900 and 2100")
+        return v
+
+    @field_validator('reported_revenue', 'organic_revenue', 'perf_fee_component')
+    @classmethod
+    def validate_revenue_fields(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Revenue values must be non-negative")
+        return v
+
+
+class TeamRevenueHistoryImport(BaseModel):
+    """Schema for team revenue history CSV import."""
+    team_id: str
+    file_id: Optional[str] = None
+    rows: Optional[List[TeamRevenueHistoryRow]] = None
+
+
+class TeamRevenueDataBase(BaseModel):
+    """Base schema for team revenue data."""
+    fiscal_year: int
+    reported_revenue: float
+    organic_revenue: Optional[float] = None
+    currency: str
+    perf_fee_component: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class TeamRevenueDataCreate(TeamRevenueDataBase):
+    """Schema for creating team revenue data."""
+    team_id: str
+    file_id: Optional[str] = None
+
+
+class TeamRevenueDataResponse(TeamRevenueDataBase):
+    """Schema for team revenue data response."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    team_id: str
+    created_at: datetime
+
+
+class OrgMembershipBase(BaseModel):
+    """Base schema for organization membership."""
+    employee_id: str
+    team_code: str
+    start_date: datetime
+    end_date: Optional[datetime] = None
+
+
+class OrgMembershipCreate(OrgMembershipBase):
+    """Schema for creating organization membership."""
+    pass
+
+
+class OrgMembershipResponse(OrgMembershipBase):
+    """Schema for organization membership response."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: str
+    created_at: datetime
+    is_active: bool
+
+
+class RAFStatusResponse(BaseModel):
+    """Schema for RAF status response."""
+    team_id: str
+    cycle: str
+    has_config: bool
+    config_id: Optional[str] = None
+    status: Optional[str] = None
+    method: Optional[str] = None
+    include_perf_fees: Optional[bool] = None
+    const_currency: Optional[bool] = None
+    cap_factor: Optional[float] = None
+    floor_factor: Optional[float] = None
+    weight_pct: Optional[float] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    rationale: Optional[str] = None
+    has_snapshot: Optional[bool] = None
+    snapshot_id: Optional[str] = None
+    computed_factor: Optional[float] = None
+    inputs_hash: Optional[str] = None
+    cap_applied: Optional[bool] = None
+    floor_applied: Optional[bool] = None
+
+
+class RAFHistoryEvent(BaseModel):
+    """Schema for RAF history event."""
+    event: str
+    timestamp: str
+    user_id: str
+    user_email: str
+    details: Dict[str, Any]
+
+
+class RAFHistoryResponse(BaseModel):
+    """Schema for RAF history response."""
+    team_id: str
+    cycle: str
+    has_config: bool
+    config_id: Optional[str] = None
+    status: Optional[str] = None
+    history: List[RAFHistoryEvent] = []
+
+
+# ================================
 # Executive Reporting Schemas (Task 21)
 # ================================
 
@@ -754,3 +1038,332 @@ class DynamicReportRequest(BaseModel):
         if v not in valid_types:
             raise ValueError(f"Report type must be one of: {valid_types}")
         return v
+
+
+# ==============================================
+# Payout Policy & Legs Schemas
+# ==============================================
+
+class PayoutTranche(BaseModel):
+    percentage: float = Field(..., ge=0, le=100)
+    instrument: str = Field(..., description="cash|fund_units|phantom")
+    grant_offset_days: Optional[int] = 0
+    vest_offset_days: Optional[int] = 0
+    retention_offset_days: Optional[int] = 0
+    currency: Optional[str] = None
+
+    @field_validator('instrument')
+    @classmethod
+    def validate_instrument(cls, v: str):
+        allowed = {'cash', 'fund_units', 'phantom'}
+        if v not in allowed:
+            raise ValueError(f"instrument must be one of {sorted(allowed)}")
+        return v
+
+
+class PayoutPolicyBase(BaseModel):
+    cycle: str
+    population: str  # MRT or non-MRT
+    rules: Dict[str, Any] = Field(..., description="{ tranches: PayoutTranche[] }")
+
+    @field_validator('population')
+    @classmethod
+    def validate_population(cls, v: str):
+        allowed = {'MRT', 'non-MRT'}
+        if v not in allowed:
+            raise ValueError("population must be 'MRT' or 'non-MRT'")
+        return v
+
+    @field_validator('rules')
+    @classmethod
+    def validate_rules(cls, v: Dict[str, Any]):
+        tranches = v.get('tranches', []) or []
+        if not isinstance(tranches, list) or len(tranches) == 0:
+            raise ValueError('rules.tranches must be a non-empty list')
+        # Validate sum of percentages
+        pct_sum = 0.0
+        for t in tranches:
+            if isinstance(t, dict):
+                pct = float(t.get('percentage', 0))
+            elif isinstance(t, PayoutTranche):
+                pct = float(t.percentage)
+            else:
+                raise ValueError('invalid tranche entry')
+            pct_sum += pct
+        if abs(pct_sum - 100.0) > 1e-6:
+            raise ValueError('tranche percentages must sum to 100')
+        return v
+
+
+class PayoutPolicyCreate(PayoutPolicyBase):
+    version: Optional[int] = 1
+
+
+class PayoutPolicyResponse(PayoutPolicyBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    version: int
+    status: str
+    created_by: Optional[str] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class PayoutLegBase(BaseModel):
+    employee_calculation_result_id: str
+    leg_number: int
+    amount: float
+    instrument: str
+    grant_date: Optional[datetime] = None
+    vest_date: Optional[datetime] = None
+    retention_end_date: Optional[datetime] = None
+    currency: Optional[str] = None
+    policy_version: Optional[int] = None
+    status: str = 'pending'
+
+
+class PayoutLegResponse(PayoutLegBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    created_at: datetime
+
+
+class PayoutSummary(BaseModel):
+    total_amount: float
+    cash_amount: float
+    deferred_amount: float
+    legs: List[PayoutLegResponse]
+    earliest_vest: Optional[datetime] = None
+    latest_vest: Optional[datetime] = None
+
+
+# ==============================================
+# Exception Schemas
+# ==============================================
+
+class ExceptionSeverity(str, Enum):
+    warning = 'warning'
+    error = 'error'
+    critical = 'critical'
+
+
+class ExceptionStatus(str, Enum):
+    open = 'open'
+    acknowledged = 'acknowledged'
+    resolved = 'resolved'
+
+
+class ExceptionEventBase(BaseModel):
+    source: str
+    reference_id: Optional[str] = None
+    exception_code: str
+    severity: ExceptionSeverity = ExceptionSeverity.warning
+    status: ExceptionStatus = ExceptionStatus.open
+    context: Optional[Dict[str, Any]] = None
+
+
+class ExceptionEventCreate(ExceptionEventBase):
+    pass
+
+
+class ExceptionEventResponse(ExceptionEventBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    created_at: datetime
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    resolution_notes: Optional[str] = None
+
+
+# ==============================================
+# Payroll Export Schemas
+# ==============================================
+
+class PayrollExportRequest(BaseModel):
+    batch_result_id: str
+    pay_date: datetime
+    format: Optional[str] = 'csv'  # csv, adp, sage
+
+    @field_validator('format')
+    @classmethod
+    def validate_format(cls, v: str):
+        allowed = {'csv', 'adp', 'sage'}
+        if v not in allowed:
+            raise ValueError(f"format must be one of {sorted(allowed)}")
+        return v
+
+
+class PayrollExportResponse(BaseModel):
+    success: bool
+    filename: str
+    download_url: str
+    checksum_sha256: str
+    exported_count: int
+
+
+# ==============================================
+# Connector & Pilot Schemas
+# ==============================================
+
+class ConnectorConfigCreate(BaseModel):
+    connector_type: str  # hris, payroll, dwh
+    system_name: str     # workday, adp, snowflake
+    config: Dict[str, Any]
+    enabled: bool = False
+
+class ConnectorConfigResponse(BaseModel):
+    id: str
+    connector_type: str
+    system_name: str
+    enabled: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ConnectorRunRequest(BaseModel):
+    data_type: str
+    filters: Optional[Dict[str, Any]] = None
+
+class ConnectorRunResponse(BaseModel):
+    success: bool
+    run_id: Optional[str]
+    upload_id: Optional[str]
+    message: Optional[str]
+
+class PilotSetupRequest(BaseModel):
+    pilot_id: Optional[str] = None
+    config: Dict[str, Any] = {}
+
+class PilotExecutionRequest(BaseModel):
+    reference_data: Dict[str, Any]
+
+class VarianceAnalysisResponse(BaseModel):
+    within_tolerance: bool
+    tolerance_pct: float
+
+class PilotReportResponse(BaseModel):
+    pilot_id: str
+    status: str
+    created_at: Optional[str] = None
+    variance: Optional[Dict[str, Any]] = None
+    results: Optional[Dict[str, Any]] = None
+
+# ==============================================
+# Malus/Clawback Schemas
+# ==============================================
+
+class RiskEventCreate(BaseModel):
+    employee_id: str
+    cycle: str
+    event_type: str  # conduct_breach, risk_threshold, manual_adjustment
+    decision: str    # malus, clawback, waive
+    amount_or_percentage: float
+    is_percentage: bool = False
+    currency: Optional[str] = None
+    occurred_at: Optional[datetime] = None
+    rationale: Optional[str] = None
+
+    @field_validator('event_type')
+    @classmethod
+    def _validate_event_type(cls, v: str) -> str:
+        allowed = {"conduct_breach", "risk_threshold", "manual_adjustment"}
+        if v not in allowed:
+            raise ValueError("invalid event_type")
+        return v
+
+    @field_validator('decision')
+    @classmethod
+    def _validate_decision(cls, v: str) -> str:
+        allowed = {"malus", "clawback", "waive"}
+        if v not in allowed:
+            raise ValueError("invalid decision")
+        return v
+
+    @field_validator('amount_or_percentage')
+    @classmethod
+    def _validate_amount(cls, v: float, info):
+        is_pct = info.data.get('is_percentage', False)
+        if is_pct and not (0 <= float(v) <= 100):
+            raise ValueError('percentage must be between 0 and 100')
+        if not is_pct and float(v) < 0:
+            raise ValueError('amount must be non-negative')
+        return v
+
+
+class PayoutAmendmentResponse(BaseModel):
+    id: str
+    original_leg_id: str
+    risk_event_id: str
+    amendment_type: str
+    original_amount: float
+    adjusted_amount: float
+    effective_date: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RiskEventResponse(BaseModel):
+    id: str
+    employee_id: str
+    cycle: str
+    event_type: str
+    decision: str
+    amount_or_percentage: float
+    is_percentage: bool
+    currency: Optional[str] = None
+    rationale: Optional[str] = None
+    approver_id: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    status: str
+    occurred_at: datetime
+    created_at: datetime
+    amendments: List[PayoutAmendmentResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MalusRequest(BaseModel):
+    cycle: str
+    amount_or_percentage: float
+    is_percentage: bool = True
+    currency: Optional[str] = None
+    rationale: Optional[str] = None
+
+    @field_validator('amount_or_percentage')
+    @classmethod
+    def _validate_malus_amount(cls, v: float, info):
+        if info.data.get('is_percentage', True):
+            if not (0 <= float(v) <= 100):
+                raise ValueError('malus percentage must be 0-100')
+        else:
+            if float(v) < 0:
+                raise ValueError('malus amount must be non-negative')
+        return v
+
+
+class ClawbackRequest(BaseModel):
+    cycle: str
+    amount_or_percentage: float
+    is_percentage: bool = False
+    currency: Optional[str] = None
+    rationale: Optional[str] = None
+
+    @field_validator('amount_or_percentage')
+    @classmethod
+    def _validate_clawback_amount(cls, v: float, info):
+        if info.data.get('is_percentage', False):
+            if not (0 <= float(v) <= 100):
+                raise ValueError('clawback percentage must be 0-100')
+        else:
+            if float(v) < 0:
+                raise ValueError('clawback amount must be non-negative')
+        return v
+
+
+class RestatementRequest(BaseModel):
+    cycle: str
+    include_amendment_history: bool = True
+    include_delta_summary: bool = True

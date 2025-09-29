@@ -35,27 +35,16 @@ class PlanManagementService:
     # ================================
     
     def get_plans(self, status_filter: Optional[str] = None,
-                  include_steps: bool = False, 
-                  include_inputs: bool = False) -> List[Dict[str, Any]]:
+                  include_steps: bool = False,
+                  include_inputs: bool = False) -> List[BonusPlanResponse]:
         """Get bonus plans with optional filtering and related data."""
         plans = self.plan_dal.get_by_tenant(status=status_filter)
-        
+
         result = []
         for plan in plans:
-            plan_data = BonusPlanResponse.model_validate(plan).model_dump()
-            
-            # Include steps if requested
-            if include_steps:
-                steps = self._get_plan_steps_data(plan.id)
-                plan_data['steps'] = steps
-            
-            # Include inputs if requested  
-            if include_inputs:
-                inputs = self._get_plan_inputs_data(plan.id)
-                plan_data['inputs'] = inputs
-            
-            result.append(plan_data)
-        
+            plan_response = BonusPlanResponse.model_validate(plan)
+            result.append(plan_response)
+
         return result
     
     def get_plan(self, plan_id: str, include_steps: bool = False,
@@ -78,7 +67,36 @@ class PlanManagementService:
             plan_data['inputs'] = inputs
         
         return plan_data
-    
+
+    def create_plan(self, plan_data: 'BonusPlanCreate', created_by: Optional[str] = None) -> 'BonusPlanResponse':
+        """Create a new bonus plan."""
+        from ..models import BonusPlan  # Import here to avoid circular import
+
+        try:
+            # Prepare data dictionary for DAL
+            plan_dict = {
+                'name': plan_data.name,
+                'version': plan_data.version,
+                'tenant_id': self.tenant_id,  # Use service's tenant_id
+                'status': plan_data.status,
+                'effective_from': plan_data.effective_from,
+                'effective_to': plan_data.effective_to,
+                'notes': plan_data.notes,
+                'plan_metadata': plan_data.plan_metadata or {},
+                'created_by': created_by
+            }
+
+            # Save to database using DAL
+            created_plan = self.plan_dal.create(plan_dict)
+
+            # Return response schema
+            from ..schemas import BonusPlanResponse
+            return BonusPlanResponse.model_validate(created_plan)
+
+        except Exception as e:
+            logger.error(f"Failed to create plan: {str(e)}")
+            raise e
+
     def update_plan(self, plan_id: str, plan_data: BonusPlanUpdate, 
                    updated_by: Optional[str] = None) -> Optional[BonusPlanResponse]:
         """Update a bonus plan (only if not locked)."""

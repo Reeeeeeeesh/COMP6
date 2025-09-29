@@ -17,6 +17,7 @@ export interface ApiResponse<T = any> {
 }
 
 import { API_BASE_URL as BASE_URL } from '../config';
+import apiClient from './apiClient';
 
 const API_BASE_URL = `${BASE_URL}/api/v1/parameter-presets`;
 
@@ -24,18 +25,11 @@ const API_BASE_URL = `${BASE_URL}/api/v1/parameter-presets`;
  * Fetch all parameter presets
  */
 export const getParameterPresets = async (): Promise<ParameterPreset[]> => {
-  const response = await fetch(`${API_BASE_URL}/`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch presets: ${response.status} ${response.statusText}`);
-  }
-  
-  const data: ApiResponse<ParameterPreset[]> = await response.json();
-  
+  const response = await apiClient.get(`${API_BASE_URL}/`);
+  const data: ApiResponse<ParameterPreset[]> = response.data;
   if (!data.success) {
     throw new Error(data.message || 'Failed to fetch parameter presets');
   }
-  
   return data.data;
 };
 
@@ -43,18 +37,11 @@ export const getParameterPresets = async (): Promise<ParameterPreset[]> => {
  * Get a specific parameter preset by ID
  */
 export const getParameterPreset = async (presetId: string): Promise<ParameterPreset> => {
-  const response = await fetch(`${API_BASE_URL}/${presetId}`);
-  
-  if (!response.ok) {
-    throw new Error(`Failed to fetch preset: ${response.status} ${response.statusText}`);
-  }
-  
-  const data: ApiResponse<ParameterPreset> = await response.json();
-  
+  const response = await apiClient.get(`${API_BASE_URL}/${presetId}`);
+  const data: ApiResponse<ParameterPreset> = response.data;
   if (!data.success) {
     throw new Error(data.message || 'Failed to fetch parameter preset');
   }
-  
   return data.data;
 };
 
@@ -63,11 +50,8 @@ export const getParameterPreset = async (presetId: string): Promise<ParameterPre
  */
 export const getDefaultParameterPreset = async (): Promise<ParameterPreset> => {
   const endpoint = `${API_BASE_URL}/default`;
-  const response = await fetch(endpoint);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch default preset: ${response.status} ${response.statusText}`);
-  }
-  const data: ApiResponse<ParameterPreset> = await response.json();
+  const response = await apiClient.get(endpoint);
+  const data: ApiResponse<ParameterPreset> = response.data;
   if (!data.success) {
     throw new Error(data.message || 'Failed to fetch default parameter preset');
   }
@@ -112,24 +96,11 @@ export const createParameterPreset = async (preset: {
   parameters: BatchParameters;
   is_default?: boolean;
 }): Promise<ParameterPreset> => {
-  const response = await fetch(`${API_BASE_URL}/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(preset)
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to create preset: ${response.status} ${response.statusText}`);
-  }
-  
-  const data: ApiResponse<ParameterPreset> = await response.json();
-  
+  const response = await apiClient.post(`${API_BASE_URL}/`, preset);
+  const data: ApiResponse<ParameterPreset> = response.data;
   if (!data.success) {
     throw new Error(data.message || 'Failed to create parameter preset');
   }
-  
   return data.data;
 };
 
@@ -145,24 +116,11 @@ export const updateParameterPreset = async (
     is_default?: boolean;
   }
 ): Promise<ParameterPreset> => {
-  const response = await fetch(`${API_BASE_URL}/${presetId}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(updates)
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to update preset: ${response.status} ${response.statusText}`);
-  }
-  
-  const data: ApiResponse<ParameterPreset> = await response.json();
-  
+  const response = await apiClient.put(`${API_BASE_URL}/${presetId}`, updates);
+  const data: ApiResponse<ParameterPreset> = response.data;
   if (!data.success) {
     throw new Error(data.message || 'Failed to update parameter preset');
   }
-  
   return data.data;
 };
 
@@ -170,16 +128,8 @@ export const updateParameterPreset = async (
  * Delete a parameter preset
  */
 export const deleteParameterPreset = async (presetId: string): Promise<void> => {
-  const response = await fetch(`${API_BASE_URL}/${presetId}`, {
-    method: 'DELETE'
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to delete preset: ${response.status} ${response.statusText}`);
-  }
-  
-  const data: ApiResponse = await response.json();
-  
+  const response = await apiClient.delete(`${API_BASE_URL}/${presetId}`);
+  const data: ApiResponse = response.data;
   if (!data.success) {
     throw new Error(data.message || 'Failed to delete parameter preset');
   }

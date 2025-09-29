@@ -3,6 +3,7 @@ File Processing Service for Batch Upload Module
 
 This service handles CSV file parsing, validation, and data extraction
 for the bonus calculator batch processing functionality.
+Enhanced with file storage system integration and lineage tracking.
 """
 
 import csv
@@ -15,9 +16,12 @@ import chardet
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from ..models import BatchUpload, EmployeeData
+from ..models import BatchUpload, EmployeeData, PlatformUpload, AuditEvent, TeamRevenueData, OrgMembership, Team
 from ..dal.batch_upload_dal import BatchUploadDAL
+from ..dal.team_raf_dal import TeamRevenueDataDAL, OrgMembershipDAL
 from ..schemas import EmployeeDataCreate
+from ..storage.file_store import FileStore, LocalFileStore, FileStorageError
+from ..feature_flags import get_feature_flags
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +70,11 @@ class FileProcessingService:
         'is_mrt', 'mrt_cap_pct'
     }
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, file_store: Optional[FileStore] = None):
         self.db = db
         self.batch_upload_dal = BatchUploadDAL(db)
+        self.file_store = file_store or LocalFileStore()
+        self.feature_flags = get_feature_flags()
     
     def validate_file(self, file_content: bytes, filename: str) -> FileValidationResult:
         """
@@ -153,11 +159,11 @@ class FileProcessingService:
             if any(not header for header in headers):
                 errors.append("Empty column headers found")
             
-            # Check minimum required columns
-            header_set = set(headers)
-            missing_required = self.REQUIRED_COLUMNS - header_set
-            if missing_required:
-                errors.append(f"Missing required columns: {', '.join(missing_required)}")
+            # Temporarily disable strict column checking to allow for mapping
+            # header_set = set(headers)
+            # missing_required = self.REQUIRED_COLUMNS - header_set
+            # if missing_required:
+            #     errors.append(f"Missing required columns: {', '.join(missing_required)}")
             
             # Check row count
             total_rows = len(data_rows)
@@ -297,6 +303,10 @@ class FileProcessingService:
                 return False, error_message
             
             # Detect encoding and parse CSV
+            # file_content is provided as bytes; earlier code mistakenly referenced
+            # an undefined variable `content_bytes`, which caused processing to fail
+            # and left no rows for column mapping. Use the actual bytes from
+            # the upload request.
             encoding_result = chardet.detect(file_content)
             encoding = encoding_result.get('encoding', 'utf-8')
             text_content = file_content.decode(encoding, errors='replace')
@@ -581,6 +591,785 @@ class FileProcessingService:
                 ['EMP001', '75000'],
                 ['EMP002', '85000']
             ]
+        
+        # Generate CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(headers)
+        writer.writerows(sample_data)
+        
+        return output.getvalue()
+    
+    def process_platform_upload(self, tenant_id: str, file_content: Union[bytes, io.BytesIO], 
+                               filename: str, created_by: Optional[str] = None, 
+                               metadata: Optional[Dict] = None) -> Tuple[bool, str, Optional[str]]:
+        """
+        Process platform upload with enhanced file storage and lineage tracking.
+        
+        Args:
+            tenant_id: Tenant identifier
+            file_content: File content as bytes or BytesIO
+            filename: Original filename
+            created_by: User ID who created the upload
+            metadata: Additional metadata to store
+            
+        Returns:
+            Tuple of (success, message, upload_id)
+        """
+        try:
+            # Check if enhanced file storage is enabled
+            if not self.feature_flags.enhanced_file_storage_enabled():
+                logger.warning("Enhanced file storage is disabled, falling back to legacy processing")
+                # Could fall back to legacy method here
+                return False, "Enhanced file storage not enabled", None
+            
+            # Convert BytesIO to bytes if needed
+            if hasattr(file_content, 'read'):
+                file_content.seek(0)
+                content_bytes = file_content.read()
+            else:
+                content_bytes = file_content
+            
+            # Validate file first
+            validation_result = self.validate_file(content_bytes, filename)
+            if not validation_result.is_valid:
+                error_message = "; ".join(validation_result.errors)
+                logger.error(f"File validation failed for {filename}: {error_message}")
+                return False, error_message, None
+            
+            # Store file using enhanced storage system
+            storage_result = self.file_store.save_file(
+                tenant_id=tenant_id,
+                file_content=content_bytes,
+                filename=filename,
+                metadata={
+                    **(metadata or {}),
+                    "created_by": created_by,
+                    "validation_result": {
+                        "total_rows": validation_result.total_rows,
+                        "column_headers": validation_result.column_headers,
+                        "warnings": validation_result.warnings
+                    }
+                }
+            )
+            
+            # Create platform upload record
+            upload = PlatformUpload(
+                tenant_id=tenant_id,
+                created_by=created_by,
+                filename=filename,
+                status="received",
+                file_size=storage_result.file_size,
+                upload_metadata=metadata or {},
+                bytes_hash=storage_result.bytes_hash,
+                storage_path=storage_result.storage_path,
+                lineage_metadata={"events": []}
+            )
+            
+            # Add initial lineage event
+            upload.update_lineage("upload", {
+                "original_filename": filename,
+                "file_size": storage_result.file_size,
+                "checksum": storage_result.bytes_hash,
+                "created_by": created_by,
+                "validation_summary": {
+                    "total_rows": validation_result.total_rows,
+                    "column_count": len(validation_result.column_headers),
+                    "warnings_count": len(validation_result.warnings)
+                }
+            })
+            
+            # Save to database
+            self.db.add(upload)
+            self.db.commit()
+            self.db.refresh(upload)
+            
+            # Create audit event
+            if self.feature_flags.audit_logging_enabled():
+                audit_event = AuditEvent(
+                    tenant_id=tenant_id,
+                    actor_user_id=created_by,
+                    action="file_upload",
+                    entity="platform_upload",
+                    entity_id=upload.id,
+                    after={
+                        "filename": filename,
+                        "file_size": storage_result.file_size,
+                        "checksum": storage_result.bytes_hash,
+                        "storage_path": storage_result.storage_path
+                    }
+                )
+                self.db.add(audit_event)
+                self.db.commit()
+            
+            logger.info(f"Platform upload processed successfully: {upload.id} (checksum: {storage_result.bytes_hash[:16]}...)")
+            
+            return True, f"File uploaded successfully. Checksum: {storage_result.bytes_hash}", upload.id
+            
+        except FileStorageError as e:
+            logger.error(f"File storage error for {filename}: {str(e)}")
+            return False, f"File storage failed: {str(e)}", None
+        except Exception as e:
+            logger.error(f"Error processing platform upload {filename}: {str(e)}")
+            self.db.rollback()
+            return False, f"Processing failed: {str(e)}", None
+    
+    def get_file_lineage(self, upload_id: str) -> Optional[Dict]:
+        """
+        Retrieve complete file lineage information for an upload.
+        
+        Args:
+            upload_id: Platform upload ID
+            
+        Returns:
+            Dict with complete lineage information or None if not found
+        """
+        try:
+            upload = self.db.query(PlatformUpload).filter(PlatformUpload.id == upload_id).first()
+            if not upload:
+                return None
+            
+            lineage_info = upload.get_lineage_info()
+            
+            # Add current file status
+            file_exists = self.file_store.file_exists(upload.storage_path) if upload.storage_path else False
+            
+            return {
+                "upload_id": upload.id,
+                "tenant_id": upload.tenant_id,
+                "filename": upload.filename,
+                "status": upload.status,
+                "file_size": upload.file_size,
+                "checksum": upload.bytes_hash,
+                "storage_path": upload.storage_path,
+                "file_exists": file_exists,
+                "created_at": upload.created_at.isoformat() if upload.created_at else None,
+                "created_by": upload.created_by,
+                "upload_metadata": upload.upload_metadata,
+                "lineage_events": lineage_info.get("events", []),
+                "integrity_verified": upload.verify_file_integrity(self.file_store) if upload.bytes_hash and upload.storage_path else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retrieving file lineage for {upload_id}: {str(e)}")
+            return None
+    
+    def verify_file_integrity(self, upload_id: str) -> Dict[str, Any]:
+        """
+        Verify file integrity for a platform upload.
+        
+        Args:
+            upload_id: Platform upload ID
+            
+        Returns:
+            Dict with verification results
+        """
+        try:
+            upload = self.db.query(PlatformUpload).filter(PlatformUpload.id == upload_id).first()
+            if not upload:
+                return {"success": False, "error": "Upload not found"}
+            
+            if not upload.bytes_hash or not upload.storage_path:
+                return {"success": False, "error": "No checksum or storage path available"}
+            
+            # Verify checksum
+            is_valid = upload.verify_file_integrity(self.file_store)
+            
+            # Update lineage with verification event
+            upload.update_lineage("integrity_check", {
+                "verified": is_valid,
+                "checksum": upload.bytes_hash,
+                "storage_path": upload.storage_path
+            })
+            
+            self.db.commit()
+            
+            return {
+                "success": True,
+                "verified": is_valid,
+                "checksum": upload.bytes_hash,
+                "storage_path": upload.storage_path,
+                "file_exists": self.file_store.file_exists(upload.storage_path)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error verifying file integrity for {upload_id}: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def add_processing_event(self, upload_id: str, event_type: str, details: Dict):
+        """
+        Add a processing event to the file lineage.
+        
+        Args:
+            upload_id: Platform upload ID
+            event_type: Type of processing event
+            details: Event details
+        """
+        try:
+            upload = self.db.query(PlatformUpload).filter(PlatformUpload.id == upload_id).first()
+            if upload:
+                upload.update_lineage(event_type, details)
+                self.db.commit()
+                logger.debug(f"Added lineage event {event_type} to upload {upload_id}")
+        except Exception as e:
+            logger.error(f"Error adding processing event to {upload_id}: {str(e)}")
+    
+    def process_team_revenue_history_csv(self, tenant_id: str, file_content: Union[bytes, io.BytesIO], 
+                                       filename: str, created_by: Optional[str] = None) -> Tuple[bool, str, List[TeamRevenueData]]:
+        """
+        Process team revenue history CSV file and create TeamRevenueData records.
+        Enhanced with file storage, lineage tracking, and audit events.
+        
+        Args:
+            tenant_id: Tenant identifier
+            file_content: Raw CSV file content as bytes or BytesIO
+            filename: Original filename
+            created_by: User ID who uploaded the file
+            
+        Returns:
+            Tuple of (success, message, created_records)
+        """
+        try:
+            # Convert BytesIO to bytes if needed
+            if hasattr(file_content, 'read'):
+                file_content.seek(0)
+                content_bytes = file_content.read()
+            else:
+                content_bytes = file_content
+
+            # Validate file format
+            validation_result = self.validate_file(content_bytes, filename)
+            if not validation_result.is_valid:
+                error_message = "; ".join(validation_result.errors)
+                return False, error_message, []
+
+            # Store file using enhanced storage system if enabled
+            upload_record = None
+            if self.feature_flags.enhanced_file_storage_enabled():
+                try:
+                    storage_result = self.file_store.save_file(
+                        tenant_id=tenant_id,
+                        file_content=content_bytes,
+                        filename=filename,
+                        metadata={
+                            "created_by": created_by,
+                            "file_type": "team_revenue_history",
+                            "validation_result": {
+                                "total_rows": validation_result.total_rows,
+                                "column_headers": validation_result.column_headers
+                            }
+                        }
+                    )
+                    
+                    # Create platform upload record for lineage
+                    upload_record = PlatformUpload(
+                        tenant_id=tenant_id,
+                        created_by=created_by,
+                        filename=filename,
+                        status="processing",
+                        file_size=storage_result.file_size,
+                        upload_metadata={"file_type": "team_revenue_history"},
+                        bytes_hash=storage_result.bytes_hash,
+                        storage_path=storage_result.storage_path,
+                        lineage_metadata={"events": []}
+                    )
+                    
+                    # Add upload lineage event
+                    upload_record.update_lineage("upload", {
+                        "original_filename": filename,
+                        "file_size": storage_result.file_size,
+                        "checksum": storage_result.bytes_hash,
+                        "created_by": created_by,
+                        "file_type": "team_revenue_history"
+                    })
+                    
+                    self.db.add(upload_record)
+                    self.db.flush()  # Get ID without committing
+                    
+                except Exception as e:
+                    logger.warning(f"File storage failed for {filename}: {str(e)}, proceeding without storage")
+            
+            # Expected columns for team revenue history
+            required_columns = {'team_code', 'fiscal_year', 'reported_revenue', 'currency'}
+            optional_columns = {'organic_revenue', 'perf_fee_component', 'notes'}
+            
+            # Check if required columns are present
+            header_set = set(validation_result.column_headers)
+            missing_columns = required_columns - header_set
+            if missing_columns:
+                return False, f"Missing required columns: {', '.join(missing_columns)}", []
+            
+            # Detect encoding and parse CSV
+            encoding_result = chardet.detect(content_bytes)
+            encoding = encoding_result.get('encoding', 'utf-8')
+            text_content = content_bytes.decode(encoding, errors='replace')
+            
+            # Use pandas for better data parsing
+            df = pd.read_csv(io.StringIO(text_content))
+            df.columns = [col.strip().lower().replace(' ', '_') for col in df.columns]
+            
+            # Validate data
+            errors = []
+            warnings = []
+            created_records = []
+            
+            # Get team revenue data DAL
+            revenue_dal = TeamRevenueDataDAL(self.db)
+            
+            # Add validation lineage event
+            if upload_record:
+                upload_record.update_lineage("validation", {
+                    "total_rows": validation_result.total_rows,
+                    "required_columns": list(required_columns),
+                    "optional_columns": list(optional_columns),
+                    "column_headers": validation_result.column_headers
+                })
+            
+            for index, row in df.iterrows():
+                try:
+                    # Validate required fields
+                    team_code = str(row['team_code']).strip() if pd.notna(row['team_code']) else None
+                    if not team_code:
+                        errors.append(f"Row {index + 2}: Missing team_code")
+                        continue
+                    
+                    # Get or create team
+                    team = self.db.query(Team).filter(Team.name == team_code).first()
+                    if not team:
+                        # Create team if it doesn't exist
+                        team = Team(name=team_code)
+                        self.db.add(team)
+                        self.db.flush()  # Get the ID without committing
+                        logger.info(f"Created new team: {team_code}")
+                    
+                    # Validate fiscal year
+                    try:
+                        fiscal_year = int(row['fiscal_year'])
+                        if fiscal_year < 2000 or fiscal_year > 2050:
+                            errors.append(f"Row {index + 2}: Invalid fiscal year {fiscal_year}")
+                            continue
+                    except (ValueError, TypeError):
+                        errors.append(f"Row {index + 2}: Invalid fiscal year format")
+                        continue
+                    
+                    # Validate reported revenue
+                    try:
+                        reported_revenue = float(row['reported_revenue'])
+                        if reported_revenue < 0:
+                            errors.append(f"Row {index + 2}: Reported revenue cannot be negative")
+                            continue
+                    except (ValueError, TypeError):
+                        errors.append(f"Row {index + 2}: Invalid reported revenue format")
+                        continue
+                    
+                    # Enhanced currency validation (ISO 4217)
+                    currency = str(row['currency']).strip().upper() if pd.notna(row['currency']) else 'USD'
+                    valid_currencies = {'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'CNY'}
+                    if currency not in valid_currencies:
+                        warnings.append(f"Row {index + 2}: Unrecognized currency code '{currency}', proceeding anyway")
+                    if len(currency) != 3:
+                        warnings.append(f"Row {index + 2}: Invalid currency code format '{currency}', using USD")
+                        currency = 'USD'
+                    
+                    # Optional fields
+                    organic_revenue = None
+                    if 'organic_revenue' in df.columns and pd.notna(row['organic_revenue']):
+                        try:
+                            organic_revenue = float(row['organic_revenue'])
+                        except (ValueError, TypeError):
+                            warnings.append(f"Row {index + 2}: Invalid organic revenue format")
+                    
+                    perf_fee_component = None
+                    if 'perf_fee_component' in df.columns and pd.notna(row['perf_fee_component']):
+                        try:
+                            perf_fee_component = float(row['perf_fee_component'])
+                        except (ValueError, TypeError):
+                            warnings.append(f"Row {index + 2}: Invalid performance fee component format")
+                    
+                    notes = None
+                    if 'notes' in df.columns and pd.notna(row['notes']):
+                        notes = str(row['notes']).strip()
+                    
+                    # Check for existing record
+                    existing = revenue_dal.get_by_team_and_year(team.id, fiscal_year)
+                    if existing:
+                        warnings.append(f"Row {index + 2}: Revenue data for {team_code} {fiscal_year} already exists, skipping")
+                        continue
+                    
+                    # Create revenue data record
+                    revenue_data = TeamRevenueData(
+                        team_id=team.id,
+                        fiscal_year=fiscal_year,
+                        reported_revenue=reported_revenue,
+                        organic_revenue=organic_revenue,
+                        currency=currency,
+                        perf_fee_component=perf_fee_component,
+                        notes=notes,
+                        file_id=upload_record.id if upload_record else None
+                    )
+                    
+                    self.db.add(revenue_data)
+                    created_records.append(revenue_data)
+                    
+                except Exception as e:
+                    errors.append(f"Row {index + 2}: Error processing row - {str(e)}")
+                    continue
+            
+            # Commit all changes if no critical errors
+            if errors:
+                self.db.rollback()
+                # Update upload status if exists
+                if upload_record:
+                    upload_record.status = "failed"
+                    upload_record.update_lineage("processing_failed", {
+                        "error_count": len(errors),
+                        "errors": errors[:5]  # First 5 errors
+                    })
+                    self.db.commit()
+                return False, f"Processing failed with {len(errors)} errors: {'; '.join(errors[:5])}", []
+            
+            self.db.commit()
+            
+            # Refresh records to get IDs
+            for record in created_records:
+                self.db.refresh(record)
+            
+            # Update upload status and lineage
+            if upload_record:
+                upload_record.status = "ready"
+                upload_record.update_lineage("import_completed", {
+                    "records_created": len(created_records),
+                    "warnings_count": len(warnings),
+                    "teams_processed": len(set(r.team_id for r in created_records))
+                })
+                self.db.commit()
+            
+            # Create audit event if enabled
+            if self.feature_flags.audit_logging_enabled():
+                audit_event = AuditEvent(
+                    tenant_id=tenant_id,
+                    actor_user_id=created_by,
+                    action="team_revenue_import",
+                    entity="team_revenue_data",
+                    entity_id=upload_record.id if upload_record else None,
+                    after={
+                        "filename": filename,
+                        "records_created": len(created_records),
+                        "teams_affected": len(set(r.team_id for r in created_records)),
+                        "checksum": upload_record.bytes_hash if upload_record else None
+                    }
+                )
+                self.db.add(audit_event)
+                self.db.commit()
+            
+            message = f"Successfully processed {len(created_records)} revenue records"
+            if warnings:
+                message += f" with {len(warnings)} warnings"
+            
+            logger.info(f"Team revenue history CSV processed: {message}")
+            return True, message, created_records
+            
+        except Exception as e:
+            logger.error(f"Error processing team revenue history CSV: {str(e)}")
+            self.db.rollback()
+            
+            # Update upload status if exists
+            if 'upload_record' in locals() and upload_record:
+                try:
+                    upload_record.status = "failed"
+                    upload_record.update_lineage("processing_error", {
+                        "error": str(e),
+                        "error_type": type(e).__name__
+                    })
+                    self.db.commit()
+                except Exception as commit_error:
+                    logger.error(f"Failed to update upload status: {str(commit_error)}")
+            
+            return False, f"Processing failed: {str(e)}", []
+    
+    def process_org_membership_csv(self, tenant_id: str, file_content: Union[bytes, io.BytesIO], 
+                                 filename: str, created_by: Optional[str] = None) -> Tuple[bool, str, List[OrgMembership]]:
+        """
+        Process organization membership CSV file and create OrgMembership records.
+        Enhanced with file storage, lineage tracking, and audit events.
+        
+        Args:
+            tenant_id: Tenant identifier
+            file_content: Raw CSV file content as bytes or BytesIO
+            filename: Original filename
+            created_by: User ID who uploaded the file
+            
+        Returns:
+            Tuple of (success, message, created_records)
+        """
+        try:
+            # Convert BytesIO to bytes if needed
+            if hasattr(file_content, 'read'):
+                file_content.seek(0)
+                content_bytes = file_content.read()
+            else:
+                content_bytes = file_content
+
+            # Validate file format
+            validation_result = self.validate_file(content_bytes, filename)
+            if not validation_result.is_valid:
+                error_message = "; ".join(validation_result.errors)
+                return False, error_message, []
+
+            # Store file using enhanced storage system if enabled
+            upload_record = None
+            if self.feature_flags.enhanced_file_storage_enabled():
+                try:
+                    storage_result = self.file_store.save_file(
+                        tenant_id=tenant_id,
+                        file_content=content_bytes,
+                        filename=filename,
+                        metadata={
+                            "created_by": created_by,
+                            "file_type": "org_membership",
+                            "validation_result": {
+                                "total_rows": validation_result.total_rows,
+                                "column_headers": validation_result.column_headers
+                            }
+                        }
+                    )
+                    
+                    # Create platform upload record for lineage
+                    upload_record = PlatformUpload(
+                        tenant_id=tenant_id,
+                        created_by=created_by,
+                        filename=filename,
+                        status="processing",
+                        file_size=storage_result.file_size,
+                        upload_metadata={"file_type": "org_membership"},
+                        bytes_hash=storage_result.bytes_hash,
+                        storage_path=storage_result.storage_path,
+                        lineage_metadata={"events": []}
+                    )
+                    
+                    # Add upload lineage event
+                    upload_record.update_lineage("upload", {
+                        "original_filename": filename,
+                        "file_size": storage_result.file_size,
+                        "checksum": storage_result.bytes_hash,
+                        "created_by": created_by,
+                        "file_type": "org_membership"
+                    })
+                    
+                    self.db.add(upload_record)
+                    self.db.flush()  # Get ID without committing
+                    
+                except Exception as e:
+                    logger.warning(f"File storage failed for {filename}: {str(e)}, proceeding without storage")
+            
+            # Expected columns for org membership
+            required_columns = {'employee_id', 'team_code', 'start_date'}
+            optional_columns = {'end_date'}
+            
+            # Check if required columns are present
+            header_set = set(validation_result.column_headers)
+            missing_columns = required_columns - header_set
+            if missing_columns:
+                return False, f"Missing required columns: {', '.join(missing_columns)}", []
+            
+            # Detect encoding and parse CSV
+            encoding_result = chardet.detect(content_bytes)
+            encoding = encoding_result.get('encoding', 'utf-8')
+            text_content = content_bytes.decode(encoding, errors='replace')
+            
+            # Use pandas for better data parsing
+            df = pd.read_csv(io.StringIO(text_content))
+            df.columns = [col.strip().lower().replace(' ', '_') for col in df.columns]
+            
+            # Validate data
+            errors = []
+            warnings = []
+            created_records = []
+            
+            # Get org membership DAL
+            membership_dal = OrgMembershipDAL(self.db)
+            
+            # Add validation lineage event
+            if upload_record:
+                upload_record.update_lineage("validation", {
+                    "total_rows": validation_result.total_rows,
+                    "required_columns": list(required_columns),
+                    "optional_columns": list(optional_columns),
+                    "column_headers": validation_result.column_headers
+                })
+            
+            for index, row in df.iterrows():
+                try:
+                    # Validate required fields
+                    employee_id = str(row['employee_id']).strip() if pd.notna(row['employee_id']) else None
+                    if not employee_id:
+                        errors.append(f"Row {index + 2}: Missing employee_id")
+                        continue
+                    
+                    team_code = str(row['team_code']).strip() if pd.notna(row['team_code']) else None
+                    if not team_code:
+                        errors.append(f"Row {index + 2}: Missing team_code")
+                        continue
+                    
+                    # Parse start date
+                    try:
+                        start_date = pd.to_datetime(row['start_date']).to_pydatetime()
+                    except (ValueError, TypeError):
+                        errors.append(f"Row {index + 2}: Invalid start_date format")
+                        continue
+                    
+                    # Parse end date (optional)
+                    end_date = None
+                    if 'end_date' in df.columns and pd.notna(row['end_date']):
+                        try:
+                            end_date = pd.to_datetime(row['end_date']).to_pydatetime()
+                            # Validate date range
+                            if end_date <= start_date:
+                                errors.append(f"Row {index + 2}: End date must be after start date")
+                                continue
+                        except (ValueError, TypeError):
+                            warnings.append(f"Row {index + 2}: Invalid end_date format, treating as ongoing")
+                    
+                    # Check for existing active membership
+                    existing = membership_dal.get_active_membership(employee_id)
+                    if existing:
+                        warnings.append(f"Row {index + 2}: Employee {employee_id} already has active membership, skipping")
+                        continue
+                    
+                    # Create membership record
+                    membership = OrgMembership(
+                        employee_id=employee_id,
+                        team_code=team_code,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    self.db.add(membership)
+                    created_records.append(membership)
+                    
+                except Exception as e:
+                    errors.append(f"Row {index + 2}: Error processing row - {str(e)}")
+                    continue
+            
+            # Commit all changes if no critical errors
+            if errors:
+                self.db.rollback()
+                # Update upload status if exists
+                if upload_record:
+                    upload_record.status = "failed"
+                    upload_record.update_lineage("processing_failed", {
+                        "error_count": len(errors),
+                        "errors": errors[:5]  # First 5 errors
+                    })
+                    self.db.commit()
+                return False, f"Processing failed with {len(errors)} errors: {'; '.join(errors[:5])}", []
+            
+            self.db.commit()
+            
+            # Refresh records to get IDs
+            for record in created_records:
+                self.db.refresh(record)
+            
+            # Update upload status and lineage
+            if upload_record:
+                upload_record.status = "ready"
+                upload_record.update_lineage("import_completed", {
+                    "records_created": len(created_records),
+                    "warnings_count": len(warnings),
+                    "employees_processed": len(set(r.employee_id for r in created_records))
+                })
+                self.db.commit()
+            
+            # Create audit event if enabled
+            if self.feature_flags.audit_logging_enabled():
+                audit_event = AuditEvent(
+                    tenant_id=tenant_id,
+                    actor_user_id=created_by,
+                    action="org_membership_import",
+                    entity="org_membership",
+                    entity_id=upload_record.id if upload_record else None,
+                    after={
+                        "filename": filename,
+                        "records_created": len(created_records),
+                        "employees_affected": len(set(r.employee_id for r in created_records)),
+                        "checksum": upload_record.bytes_hash if upload_record else None
+                    }
+                )
+                self.db.add(audit_event)
+                self.db.commit()
+            
+            message = f"Successfully processed {len(created_records)} membership records"
+            if warnings:
+                message += f" with {len(warnings)} warnings"
+            
+            logger.info(f"Organization membership CSV processed: {message}")
+            return True, message, created_records
+            
+        except Exception as e:
+            logger.error(f"Error processing organization membership CSV: {str(e)}")
+            self.db.rollback()
+            
+            # Update upload status if exists
+            if 'upload_record' in locals() and upload_record:
+                try:
+                    upload_record.status = "failed"
+                    upload_record.update_lineage("processing_error", {
+                        "error": str(e),
+                        "error_type": type(e).__name__
+                    })
+                    self.db.commit()
+                except Exception as commit_error:
+                    logger.error(f"Failed to update upload status: {str(commit_error)}")
+            
+            return False, f"Processing failed: {str(e)}", []
+    
+    def get_team_revenue_history_template(self) -> str:
+        """
+        Generate a CSV template for team revenue history import.
+        
+        Returns:
+            CSV template as string
+        """
+        headers = [
+            'team_code', 'fiscal_year', 'reported_revenue', 'organic_revenue',
+            'currency', 'perf_fee_component', 'notes'
+        ]
+        
+        sample_data = [
+            ['TEAM001', '2025', '10000000', '9500000', 'USD', '500000', 'Annual revenue for 2025'],
+            ['TEAM001', '2024', '9500000', '9000000', 'USD', '500000', 'Annual revenue for 2024'],
+            ['TEAM001', '2023', '9000000', '8500000', 'USD', '500000', 'Annual revenue for 2023'],
+            ['TEAM001', '2022', '8500000', '8000000', 'USD', '500000', 'Annual revenue for 2022'],
+            ['TEAM002', '2025', '12000000', '11500000', 'USD', '600000', 'Annual revenue for 2025'],
+            ['TEAM002', '2024', '11000000', '10500000', 'USD', '550000', 'Annual revenue for 2024']
+        ]
+        
+        # Generate CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(headers)
+        writer.writerows(sample_data)
+        
+        return output.getvalue()
+    
+    def get_org_membership_template(self) -> str:
+        """
+        Generate a CSV template for organization membership import.
+        
+        Returns:
+            CSV template as string
+        """
+        headers = [
+            'employee_id', 'team_code', 'start_date', 'end_date'
+        ]
+        
+        sample_data = [
+            ['EMP001', 'TEAM001', '2024-01-01', ''],
+            ['EMP002', 'TEAM001', '2024-01-01', '2024-06-30'],
+            ['EMP002', 'TEAM002', '2024-07-01', ''],
+            ['EMP003', 'TEAM002', '2024-01-01', ''],
+            ['EMP004', 'TEAM003', '2024-03-01', '']
+        ]
         
         # Generate CSV
         output = io.StringIO()

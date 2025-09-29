@@ -56,6 +56,35 @@ async def list_bonus_plans(
         db.close()
 
 
+@router.post("/plans", response_model=PlatformApiResponse)
+async def create_bonus_plan(
+    plan_data: BonusPlanCreate,
+    created_by: Optional[str] = Query(None, description="User ID creating the plan"),
+    request: Request = None,
+    tenant_id: str = Depends(RequiredTenant)
+):
+    """Create a new bonus plan."""
+    try:
+        db = get_tenant_db_session(request)
+        plan_service = get_plan_management_service(db, tenant_id)
+
+        plan = plan_service.create_plan(plan_data, created_by=created_by)
+
+        return PlatformApiResponse(
+            success=True,
+            data={"plan": plan.model_dump()},
+            tenant_id=tenant_id,
+            message="Bonus plan created successfully"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create plan: {str(e)}"
+        )
+    finally:
+        db.close()
+
+
 @router.get("/plans/{plan_id}", response_model=PlatformApiResponse)
 async def get_bonus_plan(
     plan_id: str,

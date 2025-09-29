@@ -140,31 +140,42 @@ export const UserContextProvider: React.FC<UserContextProviderProps> = ({ childr
   useEffect(() => {
     const initializeUser = () => {
       try {
-        // Check localStorage for persisted user
-        const savedUser = localStorage.getItem('bonus_calculator_user');
-        if (savedUser) {
-          const parsedUser = JSON.parse(savedUser);
-          setUserState(parsedUser);
-        } else {
-          // Create default mock user for development
-          // TODO: Replace with actual authentication integration
-          const mockUser: User = {
-            id: 'mock-user-123',
-            email: 'user@company.com',
-            name: 'Demo User',
-            role: 'analyst', // Default role
-            permissions: rolePermissions.analyst,
-            preferences: { ...defaultPreferences },
-            tenantId: 'default',
-            createdAt: new Date(),
-            lastLoginAt: new Date()
-          };
-          setUserState(mockUser);
-          localStorage.setItem('bonus_calculator_user', JSON.stringify(mockUser));
-        }
+        console.log('🚀 UserContext: Starting user initialization...');
+
+        // Force clear any existing user data and create new admin user
+        const existingUser = localStorage.getItem('bonus_calculator_user');
+        console.log('📦 Found existing user in localStorage:', existingUser);
+
+        localStorage.removeItem('bonus_calculator_user');
+        console.log('🗑️ Cleared existing user from localStorage');
+
+        // Create default admin user for development
+        // TODO: Replace with actual authentication integration
+        const adminUser: User = {
+          id: 'admin-user-123',
+          email: 'admin@company.com',
+          name: 'Admin User',
+          role: 'admin', // Force admin role for development testing
+          permissions: rolePermissions.admin,
+          preferences: { ...defaultPreferences },
+          tenantId: 'default',
+          createdAt: new Date(),
+          lastLoginAt: new Date()
+        };
+
+        console.log('👤 Created new admin user:', adminUser);
+
+        setUserState(adminUser);
+        localStorage.setItem('bonus_calculator_user', JSON.stringify(adminUser));
+
+        // Verify what was actually stored
+        const storedUser = localStorage.getItem('bonus_calculator_user');
+        console.log('💾 Stored user in localStorage:', storedUser);
+        console.log('✅ UserContext: Admin user initialization complete!');
+
         setIsLoading(false);
       } catch (err) {
-        console.error('Error initializing user context:', err);
+        console.error('❌ Error initializing user context:', err);
         setError('Failed to initialize user session');
         setIsLoading(false);
       }

@@ -20,7 +20,8 @@ import {
   Share,
   Add,
   Assignment,
-  Approval
+  Approval,
+  TrendingUp
 } from '@mui/icons-material';
 import { useUser, UserRole } from '../../contexts/UserContext';
 import { useTenant } from '../../contexts/TenantContext';
@@ -62,6 +63,7 @@ const navigationItems: NavigationItem[] = [
   { path: '/plans/templates', label: 'Plan Templates', icon: FileCopy, allowedRoles: ['admin'], description: 'Manage plan templates' },
   { path: '/plans/shared', label: 'Shared Plans', icon: Share, allowedRoles: ['admin'], description: 'View shared compensation plans' },
   { path: '/admin/revenue-banding', label: 'Revenue Banding', icon: BarChart, allowedRoles: ['admin'], description: 'Configure revenue bands and settings' },
+  { path: '/admin/team-raf', label: 'Team RAF Console', icon: TrendingUp, allowedRoles: ['admin'], description: 'Configure team Revenue Adjustment Factors' },
 ];
 
 // Quick action items per persona
@@ -82,6 +84,7 @@ const quickActions: Record<UserRole, NavigationItem[]> = {
     { path: '/approvals', label: 'All Approvals', icon: Assignment, allowedRoles: ['admin'], quickAction: true },
     { path: '/plans/templates', label: 'Manage Templates', icon: FileCopy, allowedRoles: ['admin'], quickAction: true },
     { path: '/admin/revenue-banding', label: 'Configure', icon: Settings, allowedRoles: ['admin'], quickAction: true },
+    { path: '/admin/team-raf', label: 'Team RAF', icon: TrendingUp, allowedRoles: ['admin'], quickAction: true },
     { path: '/batch?browse=1', label: 'Bulk Upload', icon: Storage, allowedRoles: ['admin'], quickAction: true },
   ]
 };

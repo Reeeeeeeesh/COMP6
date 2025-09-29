@@ -3,7 +3,7 @@
  * Central hub for browsing, creating, and managing compensation calculation plans
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -80,6 +80,7 @@ export const PlanLibrary: React.FC<PlanLibraryProps> = ({ mode = 'library' }) =>
 
   // State Management
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [allPlans, setAllPlans] = useState<Plan[]>([]);
   const [templates, setTemplates] = useState<PlanTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,27 +102,88 @@ export const PlanLibrary: React.FC<PlanLibraryProps> = ({ mode = 'library' }) =>
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Load data
+  const applySearch = useCallback(
+    (source: Plan[], query: string) => {
+      if (!query.trim()) return source;
+      const lowered = query.toLowerCase();
+      return source.filter(plan =>
+        plan.name.toLowerCase().includes(lowered) ||
+        plan.description?.toLowerCase().includes(lowered) ||
+        plan.tags.some(tag => tag.toLowerCase().includes(lowered))
+      );
+    },
+    []
+  );
+
+  const sortPlans = useCallback(
+    (source: Plan[]) => {
+      const sorted = [...source];
+      sorted.sort((a, b) => {
+        switch (sortBy) {
+          case 'name':
+            return a.name.localeCompare(b.name);
+          case 'status':
+            return a.status.localeCompare(b.status);
+          case 'createdAt':
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          case 'updatedAt':
+          default:
+            return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        }
+      });
+      if (sortOrder === 'desc') {
+        sorted.reverse();
+      }
+      return sorted;
+    },
+    [sortBy, sortOrder]
+  );
+
+  const recomputeVisiblePlans = useCallback(
+    (source: Plan[], query: string) => {
+      const sorted = sortPlans(source);
+      return applySearch(sorted, query);
+    },
+    [applySearch, sortPlans]
+  );
+
   useEffect(() => {
+    if (mode !== 'library') {
+      setPlans([]);
+      setAllPlans([]);
+      setTemplates([]);
+      setLoading(false);
+      setError(
+        mode === 'templates'
+          ? 'Template library is not available yet. '
+          : 'Shared plans view is not available yet.'
+      );
+      return;
+    }
+
+    setError(null);
     loadData();
-  }, [mode, filters, sortBy, sortOrder]);
+  }, [mode, filters]);
+
+  useEffect(() => {
+    if (mode !== 'library') return;
+    setPlans(recomputeVisiblePlans(allPlans, searchQuery));
+  }, [allPlans, searchQuery, recomputeVisiblePlans, mode]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      if (mode === 'templates') {
-        const templatesData = await planService.getTemplates();
-        setTemplates(templatesData);
-      } else if (mode === 'shared') {
-        const sharedPlans = await planService.getSharedPlans();
-        setPlans(sharedPlans);
-      } else {
-        const planData = await planService.getPlans(filters);
-        setPlans(planData.plans);
+      if (mode !== 'library') {
+        return;
       }
+
+      const planData = await planService.getPlans(filters);
+      setAllPlans(planData.plans);
+      setPlans(recomputeVisiblePlans(planData.plans, searchQuery));
     } catch (err) {
-      setError(`Failed to load ${mode}: ${err}`);
+      setError(`Failed to load plans: ${err}`);
     } finally {
       setLoading(false);
     }
@@ -129,16 +191,8 @@ export const PlanLibrary: React.FC<PlanLibraryProps> = ({ mode = 'library' }) =>
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
-    if (query.trim()) {
-      try {
-        const results = await planService.searchPlans(query, filters);
-        setPlans(results);
-      } catch (err) {
-        setError(`Search failed: ${err}`);
-      }
-    } else {
-      await loadData();
-    }
+    if (mode !== 'library') return;
+    setPlans(recomputeVisiblePlans(allPlans, query));
   };
 
   const handleFilterChange = (newFilters: Partial<PlanFilters>) => {

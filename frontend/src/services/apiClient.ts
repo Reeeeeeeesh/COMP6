@@ -29,6 +29,17 @@ const createApiClient = (): ApiClient => {
         'X-Tenant-ID': currentTenantId,
       };
 
+      // Add development authentication token if available
+      if (import.meta.env.DEV) {
+        const devToken = (import.meta as any).env?.VITE_DEV_AUTH_TOKEN;
+        if (devToken) {
+          config.headers = {
+            ...config.headers,
+            Authorization: `Bearer ${devToken}`,
+          };
+        }
+      }
+
       // Add request timestamp for debugging
       config.metadata = {
         ...config.metadata,

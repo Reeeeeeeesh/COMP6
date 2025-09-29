@@ -1,12 +1,26 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { FileUpload, type FileUploadHandle } from './FileUpload';
 import { FilePreview } from './FilePreview';
 import { UploadProgress } from './UploadProgress';
 import { BatchParameterConfig, BatchParameters } from './BatchParameterConfig';
 import ColumnMappingInterface from './ColumnMappingInterface';
 import { triggerBatchCalculation, getBatchCalculationResults, getBatchUploadStatus, updateBatchParameters } from '../../services/batchCalculationService';
-import { Button, CircularProgress, Box, Typography, LinearProgress, Stepper, Step, StepLabel, Alert, Chip } from '@mui/material';
+import teamRAFService from '../../services/teamRAFService';
+import { 
+  getFileChecksum, 
+  getFileLineage, 
+  verifyFileIntegrity, 
+  formatFileSize, 
+  formatChecksum, 
+  getVerificationStatusText, 
+  getVerificationStatusColor,
+  FileStorageError,
+  LoadingState,
+  createLoadingState,
+  withLoadingState
+} from '../../services/fileStorageService';
+import { Button, CircularProgress, Box, Typography, LinearProgress, Stepper, Step, StepLabel, Alert, Chip, Card, CardContent, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';
 import { 
   CalculateOutlined, 
   CloudUpload, 
@@ -184,6 +198,12 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
   // Parameters and calculation state
   const [parameters, setParameters] = useState<BatchParameters | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+  
+  // File storage and verification state
+  const [checksumState, setChecksumState] = useState<LoadingState>(createLoadingState());
+  const [lineageState, setLineageState] = useState<LoadingState>(createLoadingState());
+  const [verificationState, setVerificationState] = useState<LoadingState>(createLoadingState());
+  const [showFileDetails, setShowFileDetails] = useState(false);
   const [calculationProgress, setCalculationProgress] = useState<number>(0);
 
   // Refs: upload section for scrolling and FileUpload imperative handle
@@ -400,36 +420,38 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       formData.append('file', file);
       formData.append('session_id', sessionId);
 
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => Math.min(prev + 10, 90));
-      }, 200);
-
       console.log('Sending file upload request to:', `${API_BASE_URL}/api/v1/batch/file`);
       const response = await fetch(`${API_BASE_URL}/api/v1/batch/file`, {
         method: 'POST',
         body: formData,
       });
       console.log('Received response:', response.status, response.statusText);
-
-      clearInterval(progressInterval);
       setUploadProgress(100);
 
-      let result;
+      // Parse JSON if available, otherwise fall back to text using a clone
+      let result: any;
+      const respClone = response.clone();
       try {
-        console.log('Parsing response as JSON...');
-        result = await response.json();
-        console.log('Parsed JSON result:', result);
-      } catch (jsonError) {
-        console.error('JSON parsing error:', jsonError);
-        // Log the response text for debugging
-        try {
-          const responseText = await response.text();
-          console.error('Response text that failed to parse:', responseText);
-        } catch (textError) {
-          console.error('Failed to get response text:', textError);
+        const ct = response.headers.get('content-type') || '';
+        console.log('Parsing response as', ct || '(no content-type)');
+        if (ct.includes('application/json')) {
+          result = await response.json();
+        } else {
+          const body = await respClone.text();
+          console.error('Non-JSON upload response body:', body?.slice(0, 500));
+          if (response.status >= 500) {
+            throw new Error('Backend error (HTTP 500)');
+          }
+          throw new Error(`Unexpected server response (${response.status})`);
         }
-        throw new Error(`Failed to parse server response: ${response.status} ${response.statusText}`);
+        console.log('Parsed JSON result:', result);
+      } catch (parseErr: any) {
+        try {
+          const fallback = await respClone.text();
+          console.error('Fallback response text:', fallback?.slice(0, 500));
+        } catch {}
+        const msg = parseErr?.message || `Failed to parse server response: ${response.status} ${response.statusText}`;
+        throw new Error(msg);
       }
 
       if (!response.ok) {
@@ -467,8 +489,25 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       }
 
       if (columnsResult.success) {
+        // If columns not ready yet, poll briefly
+        let data = columnsResult.data;
+        if ((!data.columns || data.columns.length === 0) && data.status !== 'completed') {
+          console.log('Columns not ready yet; polling for processed columns...');
+          for (let attempt = 0; attempt < 6; attempt++) {
+            await new Promise(r => setTimeout(r, 1500));
+            const cr = await fetch(`${API_BASE_URL}/api/v1/batch/uploads/${upload.id}/columns`);
+            if (cr.ok) {
+              const cj = await cr.json();
+              if (cj.success) {
+                data = cj.data;
+                if ((data.columns && data.columns.length > 0) || data.status === 'completed') break;
+              }
+            }
+          }
+        }
+
         console.log('Upload successful, setting uploadData and advancing to column-mapping');
-        setUploadData(columnsResult.data);
+        setUploadData(data);
         // Mark upload step as completed
         setCompletedSteps(prev => new Set([...prev, 'upload-validation']));
         // FORCE advance to column mapping - this is the critical fix
@@ -481,11 +520,55 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
 
     } catch (err) {
       console.error('Error in file upload process:', err);
-      const parsed = parseApiError(err);
-      console.error('Setting error messages:', parsed.errors);
-      setErrors(parsed.errors);
-      setCurrentStep('upload-validation');
-      onError?.(parsed.summary);
+      // If aborted due to timeout, try to recover by polling recent uploads for this session
+      if ((err as any)?.name === 'AbortError') {
+        try {
+          setUploadProgress(95);
+          console.log('Attempting recovery by listing session uploads...');
+          const listRes = await fetch(`${API_BASE_URL}/api/v1/batch/uploads?session_id=${encodeURIComponent(sessionId)}`);
+          if (listRes.ok) {
+            const listJson = await listRes.json();
+            const uploads = (listJson?.data?.uploads || []) as any[];
+            // Use most recent upload
+            const latest = uploads.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+            if (latest) {
+              console.log('Found recent upload, fetching columns', latest.id);
+              // Poll columns a few times because processing may still be running
+              for (let attempt = 0; attempt < 6; attempt++) {
+                const colsRes = await fetch(`${API_BASE_URL}/api/v1/batch/uploads/${latest.id}/columns`);
+                if (colsRes.ok) {
+                  const colsJson = await colsRes.json();
+                  if (colsJson.success) {
+                    const data = colsJson.data;
+                    // If columns detected or status completed, proceed; else wait and retry
+                    if ((data.columns && data.columns.length > 0) || data.status === 'completed') {
+                      setUploadData(data);
+                      setCompletedSteps(prev => new Set([...prev, 'upload-validation']));
+                      setCurrentStep('column-mapping');
+                      onUploadComplete?.(latest);
+                      return; // Successful recovery
+                    }
+                  }
+                }
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            }
+          }
+          throw new Error('Background processing not found for session');
+        } catch (recoverErr) {
+          console.error('Recovery failed:', recoverErr);
+          const parsed = parseApiError(recoverErr);
+          setErrors(parsed.errors);
+          setCurrentStep('upload-validation');
+          onError?.(parsed.summary);
+        }
+      } else {
+        const parsed = parseApiError(err);
+        console.error('Setting error messages:', parsed.errors);
+        setErrors(parsed.errors);
+        setCurrentStep('upload-validation');
+        onError?.(parsed.summary);
+      }
     } finally {
       console.log('Upload process completed (success or failure)');
       setIsUploading(false);
@@ -498,7 +581,47 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
     setUploadProgress(0);
     setIsUploading(false);
     setErrors([]);
+    // Reset file storage states
+    setChecksumState(createLoadingState());
+    setLineageState(createLoadingState());
+    setVerificationState(createLoadingState());
+    setShowFileDetails(false);
   }, []);
+
+  // File storage functions
+  const fetchFileChecksum = useCallback(async (uploadId: string) => {
+    await withLoadingState(
+      () => getFileChecksum(uploadId),
+      setChecksumState
+    );
+  }, []);
+
+  const fetchFileLineage = useCallback(async (uploadId: string) => {
+    await withLoadingState(
+      () => getFileLineage(uploadId),
+      setLineageState
+    );
+  }, []);
+
+  const handleVerifyIntegrity = useCallback(async (uploadId: string) => {
+    const result = await withLoadingState(
+      () => verifyFileIntegrity(uploadId),
+      setVerificationState
+    );
+    
+    if (result) {
+      // Refresh checksum data after verification
+      await fetchFileChecksum(uploadId);
+    }
+  }, [fetchFileChecksum]);
+
+  // Automatically fetch file details when upload completes
+  useEffect(() => {
+    if (uploadData?.upload_id && currentStep !== 'upload-validation') {
+      fetchFileChecksum(uploadData.upload_id);
+      fetchFileLineage(uploadData.upload_id);
+    }
+  }, [uploadData?.upload_id, currentStep, fetchFileChecksum, fetchFileLineage]);
 
 
   const handleParametersUpdate = useCallback(async (newParameters: BatchParameters) => {
@@ -564,6 +687,51 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
       const progressInterval = setInterval(() => {
         setCalculationProgress(prev => Math.min(prev + 5, 60));
       }, 300);
+
+      // Check Team RAF validation if enabled
+      if (parameters.useTeamRAF && parameters.cycle) {
+        console.log('=== VALIDATING TEAM RAF REQUIREMENTS ===');
+        try {
+          const rafFactorsResponse = await teamRAFService.getTeamRAFFactors(parameters.cycle);
+          
+          if (!rafFactorsResponse.success || !rafFactorsResponse.data || Object.keys(rafFactorsResponse.data).length === 0) {
+            setErrors([{
+              message: 'Team RAF is enabled but no approved RAF factors found',
+              severity: 'error',
+              suggestions: [
+                `Configure and approve Team RAF factors for cycle ${parameters.cycle}`,
+                'Go to Team RAF Console to set up team configurations (/admin/team-raf)',
+                'Disable Team RAF in calculation parameters if not needed'
+              ]
+            }]);
+            clearInterval(progressInterval);
+            setIsCalculating(false);
+            setCurrentStep('parameters');
+            return;
+          }
+          
+          console.log(`Found ${Object.keys(rafFactorsResponse.data).length} approved RAF factors for cycle ${parameters.cycle}`);
+          
+          // Optional: Could add additional validation here to check if all teams 
+          // referenced in employee data have approved RAF factors
+          
+        } catch (rafError) {
+          console.error('Error validating Team RAF:', rafError);
+          setErrors([{
+            message: 'Failed to validate Team RAF requirements',
+            severity: 'error',
+            suggestions: [
+              'Check Team RAF Console for configuration status (/admin/team-raf)',
+              'Ensure all required teams have approved RAF factors',
+              'Contact administrator if the issue persists'
+            ]
+          }]);
+          clearInterval(progressInterval);
+          setIsCalculating(false);
+          setCurrentStep('parameters');
+          return;
+        }
+      }
 
       // Trigger batch calculation
       console.log('=== START CALCULATION BUTTON CLICKED ===');
@@ -944,9 +1112,9 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
             color="primary"
             onClick={() => globalFileInputRef.current?.click()}
             startIcon={<CloudUpload />}
-            aria-label="Browse files to upload"
+            aria-label="Browse to upload"
           >
-            Browse Files
+            Browse to Upload
           </Button>
           {savedDataSource && (
             <Chip 
@@ -1140,6 +1308,133 @@ export const BatchUploadContainer: React.FC<BatchUploadContainerProps> = ({
           isComplete={uploadProgress === 100}
           fileName={uploadData?.upload_id || 'Processing...'}
         />
+      )}
+
+      {/* File Storage Details - Show after upload completes */}
+      {uploadData && currentStep !== 'upload-validation' && (
+        <Card className="mb-6 border-l-4 border-l-blue-500">
+          <CardContent>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="text-green-500" />
+                <Typography variant="h6" className="font-semibold">
+                  File Upload Complete
+                </Typography>
+              </div>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setShowFileDetails(!showFileDetails)}
+              >
+                {showFileDetails ? 'Hide Details' : 'Show Details'}
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <Typography variant="body2" color="textSecondary">
+                  Filename
+                </Typography>
+                <Typography variant="body1" className="font-medium">
+                  {uploadData.original_filename}
+                </Typography>
+              </div>
+              <div>
+                <Typography variant="body2" color="textSecondary">
+                  File Size
+                </Typography>
+                <Typography variant="body1" className="font-medium">
+                  {formatFileSize(uploadData.file_size)}
+                </Typography>
+              </div>
+            </div>
+
+            {/* Checksum Information */}
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Typography variant="body2" color="textSecondary">
+                  File Checksum (SHA-256)
+                </Typography>
+                {checksumState.isLoading && <CircularProgress size={16} />}
+              </div>
+              
+              {checksumState.error ? (
+                <Alert severity="warning" className="text-sm">
+                  Could not retrieve checksum: {checksumState.error}
+                </Alert>
+              ) : checksumState.data ? (
+                <div className="flex items-center gap-2">
+                  <Typography 
+                    variant="body2" 
+                    className="font-mono text-sm bg-gray-100 px-2 py-1 rounded"
+                  >
+                    {formatChecksum(checksumState.data.checksum, 32)}
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={getVerificationStatusText(checksumState.data.verified)}
+                    color={checksumState.data.verified ? "success" : "warning"}
+                    variant="outlined"
+                  />
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handleVerifyIntegrity(uploadData.upload_id)}
+                    disabled={verificationState.isLoading}
+                    startIcon={verificationState.isLoading ? <CircularProgress size={16} /> : <AutoFixHigh />}
+                  >
+                    Verify
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Expanded File Details */}
+            {showFileDetails && (
+              <Accordion>
+                <AccordionSummary>
+                  <Typography variant="subtitle2">File Processing History</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  {lineageState.isLoading ? (
+                    <div className="flex items-center gap-2">
+                      <CircularProgress size={20} />
+                      <Typography variant="body2">Loading file history...</Typography>
+                    </div>
+                  ) : lineageState.error ? (
+                    <Alert severity="error">
+                      Could not load file history: {lineageState.error}
+                    </Alert>
+                  ) : lineageState.data ? (
+                    <div className="space-y-3">
+                      {lineageState.data.lineage_events.map((event: any, index: number) => (
+                        <div key={index} className="border-l-2 border-gray-200 pl-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Typography variant="body2" className="font-medium">
+                              {event.type.charAt(0).toUpperCase() + event.type.slice(1).replace(/_/g, ' ')}
+                            </Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              {new Date(event.timestamp).toLocaleString()}
+                            </Typography>
+                          </div>
+                          {event.details && Object.keys(event.details).length > 0 && (
+                            <Typography variant="caption" className="text-gray-600 block">
+                              {JSON.stringify(event.details, null, 2)}
+                            </Typography>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <Typography variant="body2" color="textSecondary">
+                      No processing history available
+                    </Typography>
+                  )}
+                </AccordionDetails>
+              </Accordion>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {(currentStep === 'column-mapping' || (uploadData && !completedSteps.has('column-mapping') && currentStep !== 'upload-validation')) && (

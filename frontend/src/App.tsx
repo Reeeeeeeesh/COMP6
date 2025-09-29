@@ -9,13 +9,17 @@ import UserGuide from './components/UserGuide';
 import QuickStartDemo from './components/QuickStartDemo';
 import { Dashboard } from './components/dashboard/Dashboard';
 import PersonaDashboard from './components/dashboard/PersonaDashboard';
-import { TestPersonaDashboard } from './TestComponent';
 import { PageTransition } from './components/common/PageTransition';
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, FEATURES, isFeatureEnabled } from './config';
 import RevenueBandingAdmin from './components/admin/RevenueBandingAdmin';
 import PlanBuilderMain from './components/admin/PlanBuilderMain';
+import PlanBuilderMainSafe from './components/admin/PlanBuilderMainSafe';
+import PlanBuilderEmergency from './components/admin/PlanBuilderEmergency';
+import PlanBuilderOffline from './components/admin/PlanBuilderOffline';
+import PlanBuilderTest from './components/admin/PlanBuilderTest';
 import { ExecutiveReporting } from './components/admin/ExecutiveReporting';
 import { CalculationTapeViewer } from './components/admin/CalculationTapeViewer';
+import { TeamRAFConsole } from './components/admin/TeamRAFConsole';
 
 // Import Plan Studio components
 import PlanLibrary from './components/plans/PlanLibrary';
@@ -32,9 +36,27 @@ import { useApi } from './hooks/useApi';
 
 // Role-based route mapping as specified in implementation plan
 const roleRoutes: Record<UserRole, string[]> = {
-  analyst: ['/data-hub', '/plan-studio', '/plans', '/approvals', '/scenarios', '/batch', '/calculator', '/dashboard'],
-  executive: ['/dashboard', '/reporting', '/approvals', '/summaries', '/admin/executive-reporting'],
-  admin: ['/users', '/platform', '/plans', '/plan-studio', '/approvals', '/revenue-banding', '/admin/revenue-banding', '/admin/plan-builder', '/admin/executive-reporting', '/dashboard', '/batch']
+  analyst: [
+    '/data-hub',
+    ...(isFeatureEnabled('planStudioLegacy') ? ['/plan-studio', '/plans'] : []),
+    ...(isFeatureEnabled('approvals') ? ['/approvals'] : []),
+    ...(isFeatureEnabled('scenarioV2') ? ['/scenarios'] : []),
+    '/batch', '/calculator', '/dashboard'
+  ],
+  executive: [
+    '/dashboard', '/reporting',
+    ...(isFeatureEnabled('approvals') ? ['/approvals'] : []),
+    '/summaries',
+    ...(isFeatureEnabled('execDashboardV2') ? ['/admin/executive-reporting'] : [])
+  ],
+  admin: [
+    '/users', '/platform',
+    ...(isFeatureEnabled('planStudioLegacy') ? ['/plans', '/plan-studio'] : []),
+    ...(isFeatureEnabled('approvals') ? ['/approvals'] : []),
+    '/revenue-banding', '/admin/revenue-banding', '/admin/plan-builder',
+    ...(isFeatureEnabled('execDashboardV2') ? ['/admin/executive-reporting'] : []),
+    '/admin/team-raf', '/dashboard', '/batch'
+  ]
 };
 
 // Import RoleGuard component
@@ -66,15 +88,7 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const initializeSession = async () => {
       try {
-        // For now, skip backend session creation and use temp ID immediately
-        // TODO: Re-enable backend session creation once database issues are resolved
-        const tempId = 'temp-' + Math.random().toString(36).substring(2, 15);
-        setSessionId(tempId);
-        console.log('Using temporary session ID:', tempId);
-        setIsLoading(false);
-        return;
-
-        // Original session creation code (disabled for now)
+        // Create a real backend session so uploads link to a valid record
         const response = await fetch(`${API_BASE_URL}/api/v1/sessions`, {
           method: 'POST',
           headers: {
@@ -303,73 +317,77 @@ const AppContent: React.FC = () => {
               </PageTransition>
             } />
             
-            {/* Plan Studio - Analyst and Admin */}
-            <Route path="/plans" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <PlanLibrary mode="library" />
-                </RoleGuard>
-              </PageTransition>
-            } />
-            <Route path="/plans/templates" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <PlanLibrary mode="templates" />
-                </RoleGuard>
-              </PageTransition>
-            } />
-            <Route path="/plans/shared" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <PlanLibrary mode="shared" />
-                </RoleGuard>
-              </PageTransition>
-            } />
-            <Route path="/plans/create" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <PlanStudio />
-                </RoleGuard>
-              </PageTransition>
-            } />
-            <Route path="/plans/:planId" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <PlanStudio />
-                </RoleGuard>
-              </PageTransition>
-            } />
-            <Route path="/plans/:planId/edit" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <PlanStudio />
-                </RoleGuard>
-              </PageTransition>
-            } />
+            {/* Plan Studio - Only show if legacy plan studio is enabled */}
+            {isFeatureEnabled('planStudioLegacy') && (
+              <>
+                <Route path="/plans" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <PlanLibrary mode="library" />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+                <Route path="/plans/templates" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <PlanLibrary mode="templates" />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+                <Route path="/plans/shared" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <PlanLibrary mode="shared" />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+                <Route path="/plans/create" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <PlanStudio />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+                <Route path="/plans/:planId" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <PlanStudio />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+                <Route path="/plans/:planId/edit" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <PlanStudio />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+              </>
+            )}
 
             {/* Column Mapping Studio - Analyst and Admin */}
             <Route path="/mapping-studio" element={
@@ -384,29 +402,33 @@ const AppContent: React.FC = () => {
               </PageTransition>
             } />
             
-            {/* Approval Workflows - Analyst, Executive, and Admin */}
-            <Route path="/approvals" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <ApprovalDashboard />
-                </RoleGuard>
-              </PageTransition>
-            } />
-            <Route path="/approvals/:workflowId" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <ApprovalWorkflowViewer />
-                </RoleGuard>
-              </PageTransition>
-            } />
+            {/* Approval Workflows - Only show if approvals feature is enabled */}
+            {isFeatureEnabled('approvals') && (
+              <>
+                <Route path="/approvals" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <ApprovalDashboard />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+                <Route path="/approvals/:workflowId" element={
+                  <PageTransition>
+                    <RoleGuard 
+                      require={{ type: 'role', roles: ['analyst', 'executive', 'admin'] }}
+                      fallback="redirect"
+                      redirectTo="/"
+                    >
+                      <ApprovalWorkflowViewer />
+                    </RoleGuard>
+                  </PageTransition>
+                } />
+              </>
+            )}
             
             {/* Batch operations - Analyst and Admin */}
             <Route path="/batch" element={
@@ -490,18 +512,20 @@ const AppContent: React.FC = () => {
               </PageTransition>
             } />
             
-            {/* Scenarios - Analyst and Admin */}
-            <Route path="/scenarios" element={
-              <PageTransition>
-                <RoleGuard 
-                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
-                  fallback="redirect"
-                  redirectTo="/"
-                >
-                  <ScenarioPlayground sessionId={sessionId} onError={handleUploadError} />
-                </RoleGuard>
-              </PageTransition>
-            } />
+            {/* Scenarios - Only show if scenario V2 features are enabled */}
+            {isFeatureEnabled('scenarioV2') && (
+              <Route path="/scenarios" element={
+                <PageTransition>
+                  <RoleGuard 
+                    require={{ type: 'role', roles: ['analyst', 'admin'] }}
+                    fallback="redirect"
+                    redirectTo="/"
+                  >
+                    <ScenarioPlayground sessionId={sessionId} onError={handleUploadError} />
+                  </RoleGuard>
+                </PageTransition>
+              } />
+            )}
             
             {/* Guide pages - All users */}
             <Route path="/user-guide" element={<PageTransition><QuickStartDemo /></PageTransition>} />
@@ -522,22 +546,44 @@ const AppContent: React.FC = () => {
             <Route path="/admin/plan-builder" element={
               <PageTransition>
                 <RoleGuard 
-                  require={{ type: 'role', roles: ['admin'] }}
+                  require={{ type: 'role', roles: ['analyst', 'admin'] }}
                   fallback="show-message"
-                  errorMessage="Plan builder access requires administrator privileges."
+                  errorMessage="Plan builder access requires analyst or administrator privileges."
                 >
                   <PlanBuilderMain />
                 </RoleGuard>
               </PageTransition>
             } />
-            <Route path="/admin/executive-reporting" element={
+            {/* Executive Reporting - Check if V2 dashboard features are needed */}
+            {isFeatureEnabled('execDashboardV2') ? (
+              <Route path="/admin/executive-reporting" element={
+                <PageTransition>
+                  <RoleGuard 
+                    require={{ type: 'role', roles: ['executive', 'admin'] }}
+                    fallback="show-message"
+                    errorMessage="Executive reporting requires executive or administrator access."
+                  >
+                    <ExecutiveReporting tenantId={getTenantHeader()} />
+                  </RoleGuard>
+                </PageTransition>
+              } />
+            ) : (
+              <Route path="/admin/executive-reporting" element={
+                <PageTransition>
+                  <div className="p-8 text-center text-gray-600">
+                    Executive reporting features are currently unavailable.
+                  </div>
+                </PageTransition>
+              } />
+            )}
+            <Route path="/admin/team-raf" element={
               <PageTransition>
                 <RoleGuard 
-                  require={{ type: 'role', roles: ['executive', 'admin'] }}
+                  require={{ type: 'role', roles: ['admin'] }}
                   fallback="show-message"
-                  errorMessage="Executive reporting requires executive or administrator access."
+                  errorMessage="Team RAF configuration requires administrator privileges."
                 >
-                  <ExecutiveReporting tenantId={getTenantHeader()} />
+                  <TeamRAFConsole />
                 </RoleGuard>
               </PageTransition>
             } />

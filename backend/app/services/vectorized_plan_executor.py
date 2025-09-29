@@ -48,7 +48,8 @@ class VectorizedPlanExecutor:
                                inputs: List[Dict[str, Any]],
                                employee_data: pl.DataFrame,
                                db_session: Optional[Session] = None,
-                               run_id: Optional[str] = None) -> Dict[str, Any]:
+                               run_id: Optional[str] = None,
+                               metrics_data: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Execute a bonus plan on a DataFrame of employees with vectorized operations.
         
@@ -83,9 +84,9 @@ class VectorizedPlanExecutor:
             
             # 4. Choose execution strategy based on precision mode
             if self.precision_mode == 'exact':
-                results_df = self._execute_exact_precision(ordered_steps, employee_data, db_session, run_id)
+                results_df = self._execute_exact_precision(ordered_steps, employee_data, db_session, run_id, metrics_data)
             else:
-                results_df = self._execute_vectorized_fast(ordered_steps, employee_data, db_session, run_id)
+                results_df = self._execute_vectorized_fast(ordered_steps, employee_data, db_session, run_id, metrics_data)
             
             # 5. Apply precision correction for 'balanced' mode
             if self.precision_mode == 'balanced':
@@ -142,8 +143,9 @@ class VectorizedPlanExecutor:
         
         return ordered_steps
     
-    def _execute_vectorized_fast(self, ordered_steps: List[Dict[str, Any]], df: pl.DataFrame, 
-                                db_session: Optional[Session] = None, run_id: Optional[str] = None) -> pl.DataFrame:
+    def _execute_vectorized_fast(self, ordered_steps: List[Dict[str, Any]], df: pl.DataFrame,
+                                db_session: Optional[Session] = None, run_id: Optional[str] = None,
+                                metrics_data: Optional[Dict[str, Dict[str, Any]]] = None) -> pl.DataFrame:
         """Execute steps using fast Float64 vectorized operations with fallback for complex expressions."""
         result_df = df.clone()
         
@@ -185,7 +187,7 @@ class VectorizedPlanExecutor:
                     # Fallback to row-by-row evaluation for complex expressions
                     if "too complex for vectorization" in str(ve):
                         logger.debug(f"Step '{step_name}' too complex for vectorization, using row-by-row fallback")
-                        result_df = self._execute_step_row_by_row(result_df, step_name, step_expr, step_outputs, db_session, run_id)
+                        result_df = self._execute_step_row_by_row(result_df, step_name, step_expr, step_outputs, db_session, run_id, metrics_data)
                         logger.debug(f"Step '{step_name}' executed successfully via row-by-row fallback")
                         
                         # Persist step results if session and run_id provided
@@ -200,7 +202,8 @@ class VectorizedPlanExecutor:
         return result_df
     
     def _execute_step_row_by_row(self, df: pl.DataFrame, step_name: str, expression: str, outputs: List[str],
-                                db_session: Optional[Session] = None, run_id: Optional[str] = None) -> pl.DataFrame:
+                                db_session: Optional[Session] = None, run_id: Optional[str] = None,
+                                metrics_data: Optional[Dict[str, Dict[str, Any]]] = None) -> pl.DataFrame:
         """Execute a single step using row-by-row evaluation as fallback for complex expressions."""
         # Convert DataFrame to list of dictionaries
         rows = df.to_dicts()
@@ -216,6 +219,10 @@ class VectorizedPlanExecutor:
                     else:
                         evaluation_context[key] = value
                 
+                # Inject metrics if provided (supports parser's metrics[...] access)
+                if metrics_data:
+                    emp_key = row.get('employee_id') or row.get('employee_ref') or row.get('id')
+                    evaluation_context['metrics'] = metrics_data.get(emp_key, {})
                 # Evaluate expression
                 result = self.parser.evaluate(expression, evaluation_context)
                 
@@ -242,7 +249,8 @@ class VectorizedPlanExecutor:
         return pl.DataFrame(rows)
     
     def _execute_exact_precision(self, ordered_steps: List[Dict[str, Any]], df: pl.DataFrame,
-                                db_session: Optional[Session] = None, run_id: Optional[str] = None) -> pl.DataFrame:
+                                db_session: Optional[Session] = None, run_id: Optional[str] = None,
+                                metrics_data: Optional[Dict[str, Dict[str, Any]]] = None) -> pl.DataFrame:
         """Execute steps using exact Decimal precision (row-by-row processing)."""
         # Convert DataFrame to list of dictionaries for row-by-row processing
         rows = df.to_dicts()
@@ -268,6 +276,10 @@ class VectorizedPlanExecutor:
                         else:
                             decimal_context[key] = value
                     
+                    # Inject metrics
+                    if metrics_data:
+                        emp_key = row.get('employee_id') or row.get('employee_ref') or row.get('id')
+                        decimal_context['metrics'] = metrics_data.get(emp_key, {})
                     # Evaluate expression with Decimal precision
                     result = self.parser.evaluate(step_expr, decimal_context)
                     

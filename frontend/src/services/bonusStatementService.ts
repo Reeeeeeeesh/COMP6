@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL as BASE_URL } from '../config';
+import apiClient from './apiClient';
 
 const API_BASE_URL = `${BASE_URL}/api/v1/bonus-statements`;
 
@@ -57,26 +58,14 @@ export const generateBonusStatement = async (
   employeeRef: string,
   statementRequest: BonusStatementRequest
 ): Promise<any> => {
-  const response = await fetch(
+  const response = await apiClient.post(
     `${API_BASE_URL}/runs/${runId}/employees/${employeeRef}/generate`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(statementRequest),
-    }
+    statementRequest
   );
-
-  if (!response.ok) {
-    throw new Error(`Failed to generate statement: ${response.status} ${response.statusText}`);
-  }
-
-  const result: ApiResponse = await response.json();
+  const result: ApiResponse = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to generate bonus statement');
   }
-
   return result.data;
 };
 
@@ -91,36 +80,22 @@ export const downloadBonusStatement = async (
 ): Promise<Blob> => {
   const url = new URL(`${API_BASE_URL}/runs/${runId}/employees/${employeeRef}/download`);
   url.searchParams.append('format', format);
-  
   if (options.include_calculation_steps !== undefined) {
     url.searchParams.append('include_calculation_steps', String(options.include_calculation_steps));
   }
-  
   if (options.company_name) {
     url.searchParams.append('company_name', options.company_name);
   }
-
-  const response = await fetch(url.toString());
-
-  if (!response.ok) {
-    throw new Error(`Failed to download statement: ${response.status} ${response.statusText}`);
-  }
-
-  return response.blob();
+  const response = await apiClient.get(url.toString(), { responseType: 'blob' });
+  return response.data as Blob;
 };
 
 export const getAvailableEmployeesForStatements = async (runId: string): Promise<AvailableEmployee[]> => {
-  const response = await fetch(`${API_BASE_URL}/runs/${runId}/available-employees`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to get available employees: ${response.status} ${response.statusText}`);
-  }
-
-  const result: ApiResponse<{ employees: AvailableEmployee[] }> = await response.json();
+  const response = await apiClient.get(`${API_BASE_URL}/runs/${runId}/available-employees`);
+  const result: ApiResponse<{ employees: AvailableEmployee[] }> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to get available employees');
   }
-
   return result.data.employees;
 };
 
@@ -135,34 +110,18 @@ export const bulkGenerateStatements = async (
 ): Promise<BulkGenerationResult> => {
   const url = new URL(`${API_BASE_URL}/runs/${runId}/bulk-generate`);
   url.searchParams.append('format', format);
-  
   if (options.include_calculation_steps !== undefined) {
     url.searchParams.append('include_calculation_steps', String(options.include_calculation_steps));
   }
-  
   if (options.company_name) {
     url.searchParams.append('company_name', options.company_name);
   }
-
   const body = options.employee_refs ? { employee_refs: options.employee_refs } : {};
-
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to bulk generate statements: ${response.status} ${response.statusText}`);
-  }
-
-  const result: ApiResponse<BulkGenerationResult> = await response.json();
+  const response = await apiClient.post(url.toString(), body);
+  const result: ApiResponse<BulkGenerationResult> = response.data;
   if (!result.success) {
     throw new Error(result.message || 'Failed to bulk generate statements');
   }
-
   return result.data;
 };
 

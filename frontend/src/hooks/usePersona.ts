@@ -144,7 +144,7 @@ export const usePersona = () => {
       '/batch': { roles: ['analyst', 'admin'] },
       '/scenarios': { roles: ['analyst', 'admin'] },
       '/calculator': { roles: ['analyst', 'admin'] },
-      '/admin/plan-builder': { roles: ['admin'] },
+      '/admin/plan-builder': { roles: ['analyst', 'admin'] },
       '/admin/executive-reporting': { roles: ['executive', 'admin'] },
       '/admin/revenue-banding': { roles: ['admin'] },
       '/admin/users': { roles: ['admin'] },

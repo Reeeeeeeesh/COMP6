@@ -23,3 +23,27 @@ export const DEFAULT_INVESTMENT_WEIGHT = 0.7; // 70%
 export const DEFAULT_QUALITATIVE_WEIGHT = 0.3; // 30%
 export const DEFAULT_RAF = 1.0;
 export const DEFAULT_MRT_CAP_PCT = 2.0; // 200%
+
+// Feature flags for gating incomplete UI routes
+// These flags control which features are available based on backend endpoint availability
+export const FEATURES = {
+  // Approval workflows - depends on /api/approvals, /api/approval-templates, /api/approval-notifications
+  approvals: true,
+  
+  // Legacy Plan Studio - depends on /api/plans, /api/plan-templates
+  planStudioLegacy: true,
+  
+  // Scenario V2 features - depends on /api/v2/scenarios, /api/v2/scenario-comparisons, etc.
+  scenarioV2: true,
+  
+  // Executive Dashboard V2 - depends on /api/v2/executive-dashboard
+  execDashboardV2: true,
+} as const;
+
+// Type for feature flag keys
+export type FeatureFlag = keyof typeof FEATURES;
+
+// Helper function to check if a feature is enabled
+export const isFeatureEnabled = (feature: FeatureFlag): boolean => {
+  return FEATURES[feature];
+};
